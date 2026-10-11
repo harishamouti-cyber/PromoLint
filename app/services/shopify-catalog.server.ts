@@ -45,9 +45,9 @@ const PRODUCTS_QUERY = `#graphql
                 title
                 price
                 sku
-                inventoryManagement
                 inventoryItem {
                   id
+                  tracked
                   unitCost {
                     amount
                     currencyCode
@@ -67,12 +67,11 @@ const PRODUCTS_QUERY = `#graphql
 
 const LOCATIONS_QUERY = `#graphql
   query getLocations($first: Int!) {
-    locations(first: $first, includeInactive: false) {
+    locations(first: $first) {
       edges {
         node {
           id
           name
-          isActive
         }
       }
     }
@@ -195,66 +194,84 @@ export async function fetchProductsForOfferCheck(
   searchQuery?: string,
   limit = 50
 ): Promise<CatalogProduct[]> {
-  const response = await admin.graphql(PRODUCTS_QUERY, {
-    variables: {
-      first: limit,
-      query: searchQuery ? `status:ACTIVE title:*${searchQuery}*` : "status:ACTIVE",
-    },
-  });
+  try {
+    const response = await admin.graphql(PRODUCTS_QUERY, {
+      variables: {
+        first: limit,
+        query: searchQuery ? `status:ACTIVE title:*${searchQuery}*` : "status:ACTIVE",
+      },
+    });
 
-  const json = await response.json();
-  const edges = json.data?.products?.edges || [];
+    const json = await response.json();
+    if (json.errors) {
+      console.error("fetchProductsForOfferCheck errors:", JSON.stringify(json.errors));
+      return [];
+    }
+    const edges = json.data?.products?.edges || [];
 
-  return edges.map(({ node }: any): CatalogProduct => {
-    const featuredUrl = node.featuredImage?.url || null;
-    const variants: CatalogVariant[] = (node.variants?.edges || []).map(
-      ({ node: v }: any): CatalogVariant => {
-        const rawCost = v.inventoryItem?.unitCost?.amount;
-        const unitCost = rawCost !== undefined && rawCost !== null ? parseFloat(rawCost) : null;
-        const price = parseFloat(v.price || "0");
-        const currencyCode = v.inventoryItem?.unitCost?.currencyCode || "USD";
-        const variantImageUrl = v.image?.url || featuredUrl;
+    return edges.map(({ node }: any): CatalogProduct => {
+      const featuredUrl = node.featuredImage?.url || null;
+      const variants: CatalogVariant[] = (node.variants?.edges || []).map(
+        ({ node: v }: any): CatalogVariant => {
+          const rawCost = v.inventoryItem?.unitCost?.amount;
+          const unitCost = rawCost !== undefined && rawCost !== null ? parseFloat(rawCost) : null;
+          const price = parseFloat(v.price || "0");
+          const currencyCode = v.inventoryItem?.unitCost?.currencyCode || "USD";
+          const variantImageUrl = v.image?.url || featuredUrl;
 
-        return {
-          id: v.id,
-          title: v.title,
-          price,
-          currencyCode,
-          sku: v.sku || null,
-          inventoryManagement: v.inventoryManagement || "NOT_MANAGED",
-          inventoryItemId: v.inventoryItem?.id || "",
-          unitCost,
-          imageUrl: variantImageUrl,
-        };
-      }
-    );
+          return {
+            id: v.id,
+            title: v.title,
+            price,
+            currencyCode,
+            sku: v.sku || null,
+            inventoryManagement: v.inventoryItem?.tracked ? "SHOPIFY" : "NOT_MANAGED",
+            inventoryItemId: v.inventoryItem?.id || "",
+            unitCost,
+            imageUrl: variantImageUrl,
+          };
+        }
+      );
 
-    return {
-      id: node.id,
-      title: node.title,
-      status: node.status,
-      imageUrl: featuredUrl,
-      variants,
-    };
-  });
+      return {
+        id: node.id,
+        title: node.title,
+        status: node.status,
+        imageUrl: featuredUrl,
+        variants,
+      };
+    });
+  } catch (err: any) {
+    console.error("fetchProductsForOfferCheck caught exception:", JSON.stringify(err.graphQLErrors || err.message));
+    return [];
+  }
 }
 
 /**
  * Fetch available store locations.
  */
 export async function fetchStoreLocations(admin: any, limit = 20): Promise<StoreLocation[]> {
-  const response = await admin.graphql(LOCATIONS_QUERY, {
-    variables: { first: limit },
-  });
+  try {
+    const response = await admin.graphql(LOCATIONS_QUERY, {
+      variables: { first: limit },
+    });
 
-  const json = await response.json();
-  const edges = json.data?.locations?.edges || [];
+    const json = await response.json();
+    if (json.errors) {
+      console.error("fetchStoreLocations errors:", JSON.stringify(json.errors));
+      return [];
+    }
+    const edges = json.data?.locations?.edges || [];
 
-  return edges.map(({ node }: any): StoreLocation => ({
-    id: node.id,
-    name: node.name,
-    isActive: Boolean(node.isActive),
-  }));
+    return edges.map(({ node }: any): StoreLocation => ({
+      id: node.id,
+      name: node.name,
+      isActive: true,
+    }));
+  } catch (err: any) {
+    console.error("fetchStoreLocations caught exception:", JSON.stringify(err.graphQLErrors || err.message));
+    return [];
+  }
 }
 
 /**
