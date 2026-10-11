@@ -3,6 +3,9 @@ client_id = "651686b64c50cd458dfa630df85781d5"
 application_url = "https://example.com"
 embedded = true
 
+[build]
+automatically_update_urls_on_dev = true
+
 [auth]
 redirect_urls = [
   "https://example.com/auth/callback",
