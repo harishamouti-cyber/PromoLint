@@ -1,13 +1,13 @@
 name = "PromoLint"
 client_id = "651686b64c50cd458dfa630df85781d5"
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://example.com"
 embedded = true
 
 [auth]
 redirect_urls = [
-  "https://shopify.dev/apps/default-app-home/auth/callback",
-  "https://shopify.dev/apps/default-app-home/auth/shopify/callback",
-  "https://shopify.dev/apps/default-app-home/api/auth/callback"
+  "https://example.com/auth/callback",
+  "https://example.com/auth/shopify/callback",
+  "https://example.com/api/auth/callback"
 ]
 
 [access_scopes]
