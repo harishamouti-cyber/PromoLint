@@ -32,3 +32,48 @@ model Session {
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
+
+model OfferCheck {
+  id                     String   @id @default(uuid())
+  shop                   String
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  status                 String   // "READY" | "REVIEW" | "BLOCKED"
+  triggerProductId       String
+  triggerProductTitle    String
+  triggerVariantId       String
+  triggerVariantTitle    String
+  offeredProductId       String
+  offeredProductTitle    String
+  offeredVariantId       String
+  offeredVariantTitle    String
+  offeredProductImageUrl String?
+  discountType           String   // "PERCENTAGE" | "FIXED_AMOUNT"
+  discountValue          Float
+  currencyCode           String   @default("USD")
+  currentPrice           Float
+  unitCost               Float?
+  discountedPrice        Float
+  estimatedGrossProfit   Float?
+  estimatedGrossMargin   Float?
+  locationId             String
+  locationName           String
+  inventoryQuantity      Int?
+  inventoryTracked       Boolean  @default(true)
+  warnings               String   // JSON stringified array of Warning objects
+  assumptions            String
+
+  @@index([shop, createdAt])
+}
+
+model PromoLintSettings {
+  id                  String   @id @default(uuid())
+  shop                String   @unique
+  defaultLocationId   String?
+  defaultLocationName String?
+  minStockThreshold   Int      @default(5)
+  minMarginThreshold  Float    @default(20.0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+

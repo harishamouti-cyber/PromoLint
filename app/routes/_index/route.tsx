@@ -22,36 +22,42 @@ export default function App() {
   return (
     <div className={styles.index}>
       <div className={styles.content}>
-        <h1 className={styles.heading}>A short heading about [your app]</h1>
+        <h1 className={styles.heading}>PromoLint</h1>
         <p className={styles.text}>
-          A tagline about [your app] that describes your value proposition.
+          Catch offer problems before they reach checkout.
+        </p>
+        <p style={{ color: "#6d7175", marginBottom: "20px" }}>
+          Pre-launch offer simulation and quality assurance for Shopify merchants.
+          Audit proposed promotions against catalog unit costs, live inventory levels, and store discount rules.
         </p>
         {showForm && (
           <Form className={styles.form} method="post" action="/auth/login">
             <label className={styles.label}>
               <span>Shop domain</span>
-              <input className={styles.input} type="text" name="shop" />
+              <input className={styles.input} type="text" name="shop" placeholder="my-store.myshopify.com" />
               <span>e.g: my-shop-domain.myshopify.com</span>
             </label>
             <button className={styles.button} type="submit">
-              Log in
+              Log in to PromoLint
             </button>
           </Form>
         )}
         <ul className={styles.list}>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Gross Margin Protection</strong>. Simulates proposed discounts against variant unit costs to flag margin-eroding or below-cost offers before launch.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Location-Aware Stock Check</strong>. Verifies point-in-time inventory availability at your chosen fulfillment location to prevent overselling.
           </li>
           <li>
-            <strong>Product feature</strong>. Some detail about your feature and
-            its benefit to your customer.
+            <strong>Discount Stacking Preflight</strong>. Audits active store discounts to detect combination rules that could enable unintended coupon stacking at checkout.
           </li>
         </ul>
+        <div style={{ marginTop: "32px", fontSize: "14px", color: "#6d7175", display: "flex", gap: "16px" }}>
+          <a href="/privacy" style={{ color: "#2c6ecb", textDecoration: "none" }}>Privacy Policy</a>
+          <span>•</span>
+          <a href="/terms" style={{ color: "#2c6ecb", textDecoration: "none" }}>Terms of Service</a>
+        </div>
       </div>
     </div>
   );

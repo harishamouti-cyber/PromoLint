@@ -1,0 +1,363 @@
+import { describe, it, expect } from "vitest";
+import {
+  calculateDiscountedPrice,
+  calculateProfit,
+  analyzeInventory,
+  analyzeDiscounts,
+  evaluateOfferCheck,
+  roundToCents,
+  roundPercentage,
+} from "./offer-analyzer";
+
+describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
+  describe("Decimal & Money Rounding", () => {
+    it("safely rounds money to cents avoiding binary float inaccuracy", () => {
+      expect(roundToCents(0.1 + 0.2)).toBe(0.3);
+      expect(roundToCents(19.999)).toBe(20.0);
+      expect(roundToCents(14.254)).toBe(14.25);
+    });
+
+    it("safely rounds percentages to 2 decimals", () => {
+      expect(roundPercentage(33.333333)).toBe(33.33);
+      expect(roundPercentage(66.666666)).toBe(66.67);
+    });
+  });
+
+  describe("Discounted Unit Price Calculations", () => {
+    it("calculates percentage discount accurately", () => {
+      // $100 with 20% discount = $80.00
+      expect(calculateDiscountedPrice(100, "PERCENTAGE", 20)).toBe(80.0);
+      // $49.99 with 15% discount = $42.49
+      expect(calculateDiscountedPrice(49.99, "PERCENTAGE", 15)).toBe(42.49);
+    });
+
+    it("handles 100% or greater discount by capping price at $0.00", () => {
+      expect(calculateDiscountedPrice(50, "PERCENTAGE", 100)).toBe(0);
+      expect(calculateDiscountedPrice(50, "PERCENTAGE", 120)).toBe(0);
+    });
+
+    it("calculates fixed amount discount accurately", () => {
+      // $50 with $10 fixed discount = $40.00
+      expect(calculateDiscountedPrice(50, "FIXED_AMOUNT", 10)).toBe(40.0);
+      // $25.50 with $5.25 fixed discount = $20.25
+      expect(calculateDiscountedPrice(25.5, "FIXED_AMOUNT", 5.25)).toBe(20.25);
+    });
+
+    it("caps fixed discount at 0 when discount exceeds current price", () => {
+      expect(calculateDiscountedPrice(25, "FIXED_AMOUNT", 30)).toBe(0);
+      expect(calculateDiscountedPrice(25, "FIXED_AMOUNT", 25)).toBe(0);
+    });
+  });
+
+  describe("Gross Profit & Gross Margin Calculations", () => {
+    it("calculates positive gross profit and gross margin correctly", () => {
+      // Current $100, 20% off -> $80. Cost is $40. Profit is $40. Margin is 50%.
+      const res = calculateProfit(100, "PERCENTAGE", 20, 40, 20);
+      expect(res.discountedPrice).toBe(80);
+      expect(res.unitCost).toBe(40);
+      expect(res.grossProfit).toBe(40);
+      expect(res.grossMargin).toBe(50);
+      expect(res.costMissing).toBe(false);
+      expect(res.warnings.some((w) => w.severity === "BLOCKER")).toBe(false);
+    });
+
+    it("does NOT assume zero when unit cost is missing (shows required prompt)", () => {
+      const resNull = calculateProfit(100, "PERCENTAGE", 20, null);
+      expect(resNull.costMissing).toBe(true);
+      expect(resNull.unitCost).toBeNull();
+      expect(resNull.grossProfit).toBeNull();
+      expect(resNull.grossMargin).toBeNull();
+      expect(resNull.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "MISSING_PRODUCT_COST",
+            severity: "WARNING",
+          }),
+        ])
+      );
+
+      const resUndef = calculateProfit(100, "PERCENTAGE", 20, undefined);
+      expect(resUndef.costMissing).toBe(true);
+      expect(resUndef.grossProfit).toBeNull();
+    });
+
+    it("triggers a BLOCKER when offer sells below unit cost (negative profit)", () => {
+      // Current $50, $30 fixed off -> $20. Cost is $25. Loss is $5.
+      const res = calculateProfit(50, "FIXED_AMOUNT", 30, 25);
+      expect(res.discountedPrice).toBe(20);
+      expect(res.unitCost).toBe(25);
+      expect(res.grossProfit).toBe(-5);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "SELLING_BELOW_COST",
+            severity: "BLOCKER",
+          }),
+        ])
+      );
+    });
+
+    it("triggers a WARNING when gross margin is below merchant threshold", () => {
+      // Selling price $100, cost $85 -> profit $15, margin 15%. Threshold 20%.
+      const res = calculateProfit(100, "PERCENTAGE", 0, 85, 20);
+      expect(res.grossMargin).toBe(15);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "MARGIN_BELOW_THRESHOLD",
+            severity: "WARNING",
+          }),
+        ])
+      );
+    });
+
+    it("blocks 100% or price-exceeding discounts as $0.00 selling price", () => {
+      const res100 = calculateProfit(50, "PERCENTAGE", 100, 10);
+      expect(res100.discountedPrice).toBe(0);
+      expect(res100.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "FREE_OR_NEGATIVE_PRICE",
+            severity: "BLOCKER",
+          }),
+        ])
+      );
+
+      const resFixed = calculateProfit(50, "FIXED_AMOUNT", 55, 10);
+      expect(resFixed.discountedPrice).toBe(0);
+      expect(resFixed.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "DISCOUNT_EXCEEDS_PRICE",
+            severity: "BLOCKER",
+          }),
+        ])
+      );
+    });
+  });
+
+  describe("Inventory Status & Threshold Analysis", () => {
+    it("identifies untracked inventory and gives an informational note", () => {
+      const res = analyzeInventory(null, false, "Warehouse A", 5);
+      expect(res.isTracked).toBe(false);
+      expect(res.quantity).toBeNull();
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "INVENTORY_UNTRACKED",
+            severity: "INFO",
+          }),
+        ])
+      );
+    });
+
+    it("blocks launch if tracked inventory is 0 or negative (out of stock)", () => {
+      const resZero = analyzeInventory(0, true, "Main Store", 5);
+      expect(resZero.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "OUT_OF_STOCK",
+            severity: "BLOCKER",
+          }),
+        ])
+      );
+
+      const resNeg = analyzeInventory(-2, true, "Main Store", 5);
+      expect(resNeg.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "OUT_OF_STOCK",
+            severity: "BLOCKER",
+          }),
+        ])
+      );
+    });
+
+    it("triggers a review warning if stock is below configured threshold", () => {
+      const res = analyzeInventory(3, true, "Main Store", 5);
+      expect(res.quantity).toBe(3);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "LOW_STOCK_THRESHOLD",
+            severity: "WARNING",
+          }),
+        ])
+      );
+    });
+
+    it("passes with no inventory warnings when stock is healthy", () => {
+      const res = analyzeInventory(25, true, "Main Store", 5);
+      expect(res.warnings).toHaveLength(0);
+    });
+
+    it("warns when tracked inventory level cannot be retrieved", () => {
+      const res = analyzeInventory(null, true, "Main Store", 5);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "INVENTORY_UNAVAILABLE",
+            severity: "WARNING",
+          }),
+        ])
+      );
+    });
+  });
+
+  describe("Discount Compatibility Analysis", () => {
+    it("reports warning when discount check data is unavailable instead of pretending no conflicts", () => {
+      const res = analyzeDiscounts({
+        available: false,
+        unavailableReason: "Access scope read_discounts missing",
+      });
+      expect(res.available).toBe(false);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "DISCOUNT_CHECK_UNAVAILABLE",
+            severity: "WARNING",
+          }),
+        ])
+      );
+    });
+
+    it("warns about active store discounts that allow stacking / combinations", () => {
+      const res = analyzeDiscounts({
+        available: true,
+        activeDiscounts: [
+          {
+            id: "gid://shopify/DiscountCodeNode/1",
+            title: "SUMMER10",
+            status: "ACTIVE",
+            combinesWith: {
+              productDiscounts: true,
+              orderDiscounts: true,
+              shippingDiscounts: false,
+            },
+          },
+        ],
+      });
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "STACKABLE_DISCOUNTS_DETECTED",
+            severity: "WARNING",
+          }),
+        ])
+      );
+    });
+
+    it("passes cleanly when active discounts do not allow combinations", () => {
+      const res = analyzeDiscounts({
+        available: true,
+        activeDiscounts: [
+          {
+            id: "gid://shopify/DiscountCodeNode/2",
+            title: "EXCLUSIVE20",
+            status: "ACTIVE",
+            combinesWith: {
+              productDiscounts: false,
+              orderDiscounts: false,
+              shippingDiscounts: false,
+            },
+          },
+        ],
+      });
+      expect(res.warnings).toHaveLength(0);
+    });
+  });
+
+  describe("Full Offer Evaluation Flow", () => {
+    it("returns READY when all conditions pass cleanly", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: 40,
+        discountType: "PERCENTAGE",
+        discountValue: 15,
+        inventoryQuantity: 20,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("READY");
+      expect(result.discountedPrice).toBe(85);
+      expect(result.estimatedGrossProfit).toBe(45);
+      expect(result.estimatedGrossMargin).toBe(52.94);
+      expect(result.warnings.some((w) => w.severity === "BLOCKER")).toBe(false);
+      expect(result.warnings.some((w) => w.severity === "WARNING")).toBe(false);
+      expect(result.assumptions).toContain("Estimated gross profit per unit");
+    });
+
+    it("returns REVIEW when unit cost is missing", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: null,
+        discountType: "PERCENTAGE",
+        discountValue: 15,
+        inventoryQuantity: 20,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("REVIEW");
+      expect(result.estimatedGrossProfit).toBeNull();
+      expect(result.estimatedGrossMargin).toBeNull();
+      expect(result.warnings.some((w) => w.code === "MISSING_PRODUCT_COST")).toBe(true);
+    });
+
+    it("returns BLOCKED when selling below unit cost", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: 80,
+        discountType: "PERCENTAGE",
+        discountValue: 30, // Price becomes 70, Cost is 80 -> loss of 10
+        inventoryQuantity: 20,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("BLOCKED");
+      expect(result.estimatedGrossProfit).toBe(-10);
+      expect(result.warnings.some((w) => w.code === "SELLING_BELOW_COST")).toBe(true);
+    });
+
+    it("returns BLOCKED when out of stock at selected location", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: 40,
+        discountType: "PERCENTAGE",
+        discountValue: 10,
+        inventoryQuantity: 0,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("BLOCKED");
+      expect(result.warnings.some((w) => w.code === "OUT_OF_STOCK")).toBe(true);
+    });
+  });
+});
