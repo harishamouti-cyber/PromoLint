@@ -1,6 +1,6 @@
 # This file stores configurations for your Shopify app.
 name = "PromoLint"
-client_id = ""
+client_id = "651686b64c50cd458dfa630df85781d5"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
