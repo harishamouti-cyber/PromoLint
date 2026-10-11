@@ -1,6 +1,14 @@
-# This file stores configurations for your Shopify app.
 name = "PromoLint"
 client_id = "651686b64c50cd458dfa630df85781d5"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = true
+
+[auth]
+redirect_urls = [
+  "https://shopify.dev/apps/default-app-home/auth/callback",
+  "https://shopify.dev/apps/default-app-home/auth/shopify/callback",
+  "https://shopify.dev/apps/default-app-home/api/auth/callback"
+]
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
