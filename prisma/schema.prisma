@@ -60,8 +60,10 @@ model OfferCheck {
   locationName           String
   inventoryQuantity      Int?
   inventoryTracked       Boolean  @default(true)
+  inventoryState         String?  @default("HEALTHY") // "UNTRACKED" | "MISSING_RECORD" | "ZERO_STOCK" | "LOW_STOCK" | "HEALTHY" | "UNAVAILABLE"
   warnings               String   // JSON stringified array of Warning objects
   assumptions            String
+  recheckOfId            String?
 
   @@index([shop, createdAt])
 }

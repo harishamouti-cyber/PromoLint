@@ -125,10 +125,10 @@ export default function SettingsScreen() {
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    Audit Thresholds
+                    Merchant Audit Preferences
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Customize the warning sensitivity for pre-launch offer audits.
+                    Customize your store's warning sensitivity for pre-launch offer audits. These thresholds represent your advisory QA preferences; they do not alter Shopify inventory policies or block discount creation in your store.
                   </Text>
 
                   <Select
@@ -147,7 +147,7 @@ export default function SettingsScreen() {
                     value={minStockThreshold}
                     onChange={setMinStockThreshold}
                     autoComplete="off"
-                    helpText="Triggers a review warning if available inventory at check time is below this number."
+                    helpText="Advisory preference: Triggers a review warning if available inventory at check time is below this number."
                     error={actionData?.errors?.minStockThreshold}
                   />
 
@@ -159,7 +159,7 @@ export default function SettingsScreen() {
                     onChange={setMinMarginThreshold}
                     autoComplete="off"
                     suffix="%"
-                    helpText="Triggers a review warning if estimated gross margin is below this percentage."
+                    helpText="Advisory preference: Triggers a review warning if estimated gross margin is below this percentage."
                     error={actionData?.errors?.minMarginThreshold}
                   />
 

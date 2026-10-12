@@ -7,6 +7,14 @@ export type DiscountType = "PERCENTAGE" | "FIXED_AMOUNT";
 
 export type WarningSeverity = "BLOCKER" | "WARNING" | "INFO";
 
+export type InventoryState =
+  | "UNTRACKED"
+  | "MISSING_RECORD"
+  | "ZERO_STOCK"
+  | "LOW_STOCK"
+  | "HEALTHY"
+  | "UNAVAILABLE";
+
 export interface OfferWarning {
   code: string;
   message: string;
@@ -25,6 +33,7 @@ export interface ProfitResult {
 export interface InventoryAnalysisResult {
   quantity: number | null;
   isTracked: boolean;
+  inventoryState: InventoryState;
   locationName: string;
   warnings: OfferWarning[];
 }
@@ -56,6 +65,7 @@ export interface EvaluateOfferParams {
   currencyCode?: string;
   inventoryQuantity: number | null | undefined;
   inventoryTracked: boolean;
+  hasInventoryRecord?: boolean;
   locationName: string;
   minStockThreshold: number;
   minMarginThreshold: number;
@@ -74,6 +84,7 @@ export interface OfferEvaluationResult {
   estimatedGrossMargin: number | null;
   inventoryQuantity: number | null;
   inventoryTracked: boolean;
+  inventoryState: InventoryState;
   locationName: string;
   warnings: OfferWarning[];
   assumptions: string;
@@ -82,11 +93,11 @@ export interface OfferEvaluationResult {
 
 export const PROMO_LINT_ASSUMPTIONS_TEXT =
   "Estimated gross profit per unit is calculated as (discounted unit price − unit cost). " +
-  "It explicitly excludes shipping, taxes, payment gateway fees, refunds, returns, packaging, and operating overhead. " +
+  "It explicitly excludes shipping, taxes, payment gateway processing fees (e.g. 2.9% + 30¢), packaging, warehouse handling, and customer returns/refunds. " +
   "This is an estimated gross figure, not net profit or guaranteed profit. " +
-  "Inventory counts reflect available stock observed at the check timestamp and do not reserve stock. " +
-  "Discount findings highlight active store discount settings and combination rules; customer eligibility, cart contents, " +
-  "and Shopify checkout logic dictate actual final customer pricing.";
+  "Point-in-time inventory counts reflect stock observed at the check timestamp and do not reserve stock. " +
+  "Discount findings highlight active store discount combination settings; shopper eligibility, cart contents, " +
+  "and Shopify checkout logic dictate actual final customer pricing. PromoLint is an administrative QA tool and does not publish offers, enforce storefront cart rules, or modify checkout.";
 
 /**
  * Safe round to 2 decimal places to prevent binary floating-point inaccuracies
@@ -159,7 +170,7 @@ export function calculateProfit(
   if (unitCost === null || unitCost === undefined || isNaN(unitCost)) {
     warnings.push({
       code: "MISSING_PRODUCT_COST",
-      message: "Add product cost in Shopify to calculate profit. Gross profit and margin cannot be estimated without unit cost.",
+      message: "Add product cost in Shopify (Shopify Admin > Products > [Product] > Cost per item) to calculate profit. Gross profit and margin cannot be estimated without unit cost.",
       severity: "WARNING",
     });
 
@@ -192,7 +203,7 @@ export function calculateProfit(
   } else if (grossMargin !== null && grossMargin < minMarginThreshold) {
     warnings.push({
       code: "MARGIN_BELOW_THRESHOLD",
-      message: `Estimated gross margin is ${grossMargin}%, which is below your configured warning threshold of ${minMarginThreshold}%.`,
+      message: `Estimated gross margin is ${grossMargin}%, which is below your configured merchant preference threshold of ${minMarginThreshold}%.`,
       severity: "WARNING",
     });
   }
@@ -209,30 +220,52 @@ export function calculateProfit(
 
 /**
  * Analyze inventory levels against threshold and tracking configuration.
+ * Distinct states: UNTRACKED, MISSING_RECORD, ZERO_STOCK, LOW_STOCK, HEALTHY, UNAVAILABLE.
  */
 export function analyzeInventory(
   quantity: number | null | undefined,
   isTracked: boolean,
   locationName: string,
-  minStockThreshold = 5
+  minStockThreshold = 5,
+  hasInventoryRecord = true
 ): InventoryAnalysisResult {
   const warnings: OfferWarning[] = [];
 
+  // State 1: Untracked in Shopify
   if (!isTracked) {
     warnings.push({
       code: "INVENTORY_UNTRACKED",
-      message: `Inventory tracking is not enabled for this variant in Shopify. Stock is not constrained at ${locationName}.`,
+      message: `Inventory tracking is disabled for this variant in Shopify. Stock is not monitored at ${locationName}.`,
       severity: "INFO",
     });
 
     return {
       quantity: null,
       isTracked: false,
+      inventoryState: "UNTRACKED",
       locationName,
       warnings,
     };
   }
 
+  // State 2: Missing inventory record at selected location
+  if (hasInventoryRecord === false) {
+    warnings.push({
+      code: "INVENTORY_RECORD_MISSING",
+      message: `No inventory record exists for this variant at ${locationName}. Stock cannot be verified at this location.`,
+      severity: "WARNING",
+    });
+
+    return {
+      quantity: null,
+      isTracked: true,
+      inventoryState: "MISSING_RECORD",
+      locationName,
+      warnings,
+    };
+  }
+
+  // State 3: Inventory level unavailable (API query error or unreadable)
   if (quantity === null || quantity === undefined) {
     warnings.push({
       code: "INVENTORY_UNAVAILABLE",
@@ -243,28 +276,54 @@ export function analyzeInventory(
     return {
       quantity: null,
       isTracked: true,
+      inventoryState: "UNAVAILABLE",
       locationName,
       warnings,
     };
   }
 
+  // State 4: Zero stock (0 or negative oversold)
   if (quantity <= 0) {
+    const isZero = quantity === 0;
     warnings.push({
       code: "OUT_OF_STOCK",
-      message: `Variant is out of stock at ${locationName} (${quantity} units observed). Launching an offer without stock may cause order fulfillment delays.`,
+      message: isZero
+        ? `Variant has 0 units available at ${locationName} (out of stock). Launching an offer with zero stock risks unfulfillable orders.`
+        : `Variant has negative inventory (${quantity} units) at ${locationName} (oversold). Launching an offer with negative stock risks fulfillment failures.`,
       severity: "BLOCKER",
     });
-  } else if (quantity < minStockThreshold) {
-    warnings.push({
-      code: "LOW_STOCK_THRESHOLD",
-      message: `Low inventory: Only ${quantity} units observed at ${locationName}, which is below your threshold of ${minStockThreshold} units.`,
-      severity: "WARNING",
-    });
+
+    return {
+      quantity,
+      isTracked: true,
+      inventoryState: "ZERO_STOCK",
+      locationName,
+      warnings,
+    };
   }
 
+  // State 5: Low stock below merchant-configured threshold
+  if (quantity < minStockThreshold) {
+    warnings.push({
+      code: "LOW_STOCK_THRESHOLD",
+      message: `Low inventory: Only ${quantity} units observed at ${locationName}, which is below your configured merchant preference threshold of ${minStockThreshold} units.`,
+      severity: "WARNING",
+    });
+
+    return {
+      quantity,
+      isTracked: true,
+      inventoryState: "LOW_STOCK",
+      locationName,
+      warnings,
+    };
+  }
+
+  // State 6: Healthy inventory
   return {
     quantity,
     isTracked: true,
+    inventoryState: "HEALTHY",
     locationName,
     warnings,
   };
@@ -312,7 +371,7 @@ export function analyzeDiscounts(
     const sampleTitles = stackableDiscounts.slice(0, 3).map((d) => `"${d.title}"`).join(", ");
     warnings.push({
       code: "STACKABLE_DISCOUNTS_DETECTED",
-      message: `${stackableDiscounts.length} active store discount(s) have combination permissions enabled (${sampleTitles}). Shoppers might stack additional discounts at checkout.`,
+      message: `${stackableDiscounts.length} active store discount(s) have combination permissions enabled (${sampleTitles}). Shoppers might stack additional discounts at checkout. Note: Shopify checkout combination rules and customer eligibility govern final checkout pricing; PromoLint does not simulate checkout totals.`,
       severity: "WARNING",
     });
   }
@@ -340,12 +399,13 @@ export function evaluateOfferCheck(params: EvaluateOfferParams): OfferEvaluation
   );
   allWarnings.push(...profitAnalysis.warnings);
 
-  // 2. Inventory Analysis
+  // 2. Inventory Analysis with distinct states
   const inventoryAnalysis = analyzeInventory(
     params.inventoryQuantity,
     params.inventoryTracked,
     params.locationName,
-    params.minStockThreshold
+    params.minStockThreshold,
+    params.hasInventoryRecord ?? true
   );
   allWarnings.push(...inventoryAnalysis.warnings);
 
@@ -361,6 +421,13 @@ export function evaluateOfferCheck(params: EvaluateOfferParams): OfferEvaluation
     status = "REVIEW";
   }
 
+  // Strict invariant: Missing unit cost CANNOT produce a green Ready status
+  if (profitAnalysis.costMissing || profitAnalysis.unitCost === null) {
+    if (status === "READY") {
+      status = "REVIEW";
+    }
+  }
+
   return {
     status,
     discountedPrice: profitAnalysis.discountedPrice,
@@ -369,6 +436,7 @@ export function evaluateOfferCheck(params: EvaluateOfferParams): OfferEvaluation
     estimatedGrossMargin: profitAnalysis.grossMargin,
     inventoryQuantity: inventoryAnalysis.quantity,
     inventoryTracked: inventoryAnalysis.isTracked,
+    inventoryState: inventoryAnalysis.inventoryState,
     locationName: inventoryAnalysis.locationName,
     warnings: allWarnings,
     assumptions: PROMO_LINT_ASSUMPTIONS_TEXT,

@@ -18,19 +18,24 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { getRecentOfferChecks } from "../services/checks.server";
+import { checkStoreReadiness } from "../services/shopify-catalog.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
-  const checks = await getRecentOfferChecks(session.shop, 5);
+  const { admin, session } = await authenticate.admin(request);
+  const [checks, readiness] = await Promise.all([
+    getRecentOfferChecks(session.shop, 5),
+    checkStoreReadiness(admin),
+  ]);
 
   return json({
     checks,
     shop: session.shop,
+    readiness,
   });
 };
 
 export default function HomeScreen() {
-  const { checks, shop } = useLoaderData<typeof loader>();
+  const { checks, shop, readiness } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   const renderStatusBadge = (status: string) => {
@@ -64,9 +69,57 @@ export default function HomeScreen() {
       <BlockStack gap="500">
         <Banner tone="info" title="Pre-launch offer quality assurance">
           <p>
-            PromoLint is an administrative QA tool to audit your proposed promotion parameters
+            PromoLint is an administrative QA tool to audit proposed promotion scenarios
             against live inventory, catalog unit costs, and active store discounts before you
             launch. PromoLint does not publish storefront widgets, modify checkout, or alter merchant theme files.
+          </p>
+        </Banner>
+
+        {/* Store Readiness Status based purely on live Shopify Admin GraphQL API checks */}
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center">
+              <InlineStack gap="200" blockAlign="center">
+                <Text as="h2" variant="headingMd">
+                  Store Audit Readiness
+                </Text>
+                {readiness.isReady ? (
+                  <Badge tone="success">Ready for audits</Badge>
+                ) : (
+                  <Badge tone="warning">Setup required</Badge>
+                )}
+              </InlineStack>
+              <Text as="span" variant="bodyXs" tone="subdued">
+                Live Shopify API check
+              </Text>
+            </InlineStack>
+            <Divider />
+            {readiness.isReady ? (
+              <Text as="p" variant="bodyMd">
+                Shopify Admin API permissions are confirmed active. We verified access to your product catalog ({readiness.productCount} active products detected),
+                store fulfillment locations ({readiness.locationCount} locations), and active store discount rules.
+              </Text>
+            ) : (
+              <BlockStack gap="200">
+                <Text as="p" variant="bodyMd" tone="caution">
+                  PromoLint detected store requirements needing attention before offers can be fully audited:
+                </Text>
+                <ul style={{ margin: 0, paddingLeft: "16px" }}>
+                  {readiness.missingRequirements.map((req: string, i: number) => (
+                    <li key={i}>{req}</li>
+                  ))}
+                </ul>
+              </BlockStack>
+            )}
+          </BlockStack>
+        </Card>
+
+        {/* First-Run Guidance for Missing Product Costs */}
+        <Banner tone="info" title="First-time setup tip: Set variant unit costs in Shopify">
+          <p>
+            PromoLint strictly uses real Shopify data and never fabricates mock profit numbers. To calculate estimated gross margin,
+            Shopify must have a <strong>Cost per item</strong> recorded for your variants (under <em>Shopify Admin &gt; Products &gt; [Product] &gt; Variants</em>).
+            Offers with missing costs will be flagged for review to prevent unnoticed financial losses.
           </p>
         </Banner>
 
@@ -89,8 +142,7 @@ export default function HomeScreen() {
                 </InlineStack>
                 <Divider />
                 <Text as="p" variant="bodySm" tone="subdued">
-                  All catalog and inventory data are queried in real time directly from your Shopify store.
-                  Cost calculations estimate gross margins excluding shipping, taxes, and payment fees.
+                  Each check queries your live Shopify Admin GraphQL API upon submission and saves an immutable, time-stamped snapshot for your records.
                 </Text>
               </BlockStack>
             </Card>

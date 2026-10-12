@@ -140,6 +140,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
     it("identifies untracked inventory and gives an informational note", () => {
       const res = analyzeInventory(null, false, "Warehouse A", 5);
       expect(res.isTracked).toBe(false);
+      expect(res.inventoryState).toBe("UNTRACKED");
       expect(res.quantity).toBeNull();
       expect(res.warnings).toEqual(
         expect.arrayContaining([
@@ -151,8 +152,23 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       );
     });
 
-    it("blocks launch if tracked inventory is 0 or negative (out of stock)", () => {
+    it("identifies missing inventory record at selected location", () => {
+      const res = analyzeInventory(null, true, "Remote Depot", 5, false);
+      expect(res.isTracked).toBe(true);
+      expect(res.inventoryState).toBe("MISSING_RECORD");
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "INVENTORY_RECORD_MISSING",
+            severity: "WARNING",
+          }),
+        ])
+      );
+    });
+
+    it("blocks launch if tracked inventory is 0 (out of stock) or negative (oversold)", () => {
       const resZero = analyzeInventory(0, true, "Main Store", 5);
+      expect(resZero.inventoryState).toBe("ZERO_STOCK");
       expect(resZero.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -163,6 +179,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       );
 
       const resNeg = analyzeInventory(-2, true, "Main Store", 5);
+      expect(resNeg.inventoryState).toBe("ZERO_STOCK");
       expect(resNeg.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -176,6 +193,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
     it("triggers a review warning if stock is below configured threshold", () => {
       const res = analyzeInventory(3, true, "Main Store", 5);
       expect(res.quantity).toBe(3);
+      expect(res.inventoryState).toBe("LOW_STOCK");
       expect(res.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -188,11 +206,13 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
 
     it("passes with no inventory warnings when stock is healthy", () => {
       const res = analyzeInventory(25, true, "Main Store", 5);
+      expect(res.inventoryState).toBe("HEALTHY");
       expect(res.warnings).toHaveLength(0);
     });
 
-    it("warns when tracked inventory level cannot be retrieved", () => {
-      const res = analyzeInventory(null, true, "Main Store", 5);
+    it("warns when tracked inventory level cannot be retrieved (unavailable)", () => {
+      const res = analyzeInventory(null, true, "Main Store", 5, true);
+      expect(res.inventoryState).toBe("UNAVAILABLE");
       expect(res.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -289,12 +309,13 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       expect(result.discountedPrice).toBe(85);
       expect(result.estimatedGrossProfit).toBe(45);
       expect(result.estimatedGrossMargin).toBe(52.94);
+      expect(result.inventoryState).toBe("HEALTHY");
       expect(result.warnings.some((w) => w.severity === "BLOCKER")).toBe(false);
       expect(result.warnings.some((w) => w.severity === "WARNING")).toBe(false);
       expect(result.assumptions).toContain("Estimated gross profit per unit");
     });
 
-    it("returns REVIEW when unit cost is missing", () => {
+    it("strictly prevents READY status when unit cost is missing (returns REVIEW)", () => {
       const result = evaluateOfferCheck({
         currentPrice: 100,
         unitCost: null,
@@ -312,6 +333,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       });
 
       expect(result.status).toBe("REVIEW");
+      expect(result.status).not.toBe("READY");
       expect(result.estimatedGrossProfit).toBeNull();
       expect(result.estimatedGrossMargin).toBeNull();
       expect(result.warnings.some((w) => w.code === "MISSING_PRODUCT_COST")).toBe(true);
@@ -357,6 +379,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       });
 
       expect(result.status).toBe("BLOCKED");
+      expect(result.inventoryState).toBe("ZERO_STOCK");
       expect(result.warnings.some((w) => w.code === "OUT_OF_STOCK")).toBe(true);
     });
   });

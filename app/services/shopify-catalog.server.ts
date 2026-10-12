@@ -276,14 +276,15 @@ export async function fetchStoreLocations(admin: any, limit = 20): Promise<Store
 
 /**
  * Fetch exact inventory available quantity for an inventory item at a specific location.
+ * Distinguishes between untracked, missing inventory record, zero stock, and unavailable.
  */
 export async function fetchInventoryAvailable(
   admin: any,
   inventoryItemId: string,
   locationId: string
-): Promise<{ available: number | null; error?: string }> {
+): Promise<{ available: number | null; hasInventoryRecord: boolean; error?: string }> {
   if (!inventoryItemId || !locationId) {
-    return { available: null, error: "Missing inventory item ID or location ID" };
+    return { available: null, hasInventoryRecord: false, error: "Missing inventory item ID or location ID" };
   }
 
   try {
@@ -295,17 +296,129 @@ export async function fetchInventoryAvailable(
     });
 
     const json = await response.json();
-    const quantities = json.data?.inventoryItem?.inventoryLevel?.quantities || [];
+    if (json.errors) {
+      return {
+        available: null,
+        hasInventoryRecord: false,
+        error: json.errors.map((e: any) => e.message).join(", "),
+      };
+    }
+
+    const inventoryLevel = json.data?.inventoryItem?.inventoryLevel;
+    if (!inventoryLevel) {
+      // No inventory record exists for this item at this location
+      return { available: null, hasInventoryRecord: false };
+    }
+
+    const quantities = inventoryLevel.quantities || [];
     const availableQty = quantities.find((q: any) => q.name === "available");
 
     if (availableQty && typeof availableQty.quantity === "number") {
-      return { available: availableQty.quantity };
+      return { available: availableQty.quantity, hasInventoryRecord: true };
     }
 
-    return { available: null };
+    return { available: 0, hasInventoryRecord: true };
   } catch (err: any) {
-    return { available: null, error: err.message || "Failed to query inventory level" };
+    return { available: null, hasInventoryRecord: false, error: err.message || "Failed to query inventory level" };
   }
+}
+
+export interface StoreReadiness {
+  isReady: boolean;
+  productsAccessible: boolean;
+  productCount: number;
+  locationsAccessible: boolean;
+  locationCount: number;
+  discountsAccessible: boolean;
+  missingRequirements: string[];
+  checkedAt: string;
+}
+
+/**
+ * Check store readiness based only on live Shopify Admin GraphQL API queries and granted permissions.
+ */
+export async function checkStoreReadiness(admin: any): Promise<StoreReadiness> {
+  const missingRequirements: string[] = [];
+  let productsAccessible = false;
+  let productCount = 0;
+  let locationsAccessible = false;
+  let locationCount = 0;
+  let discountsAccessible = false;
+
+  // 1. Products & catalog permissions
+  try {
+    const prodRes = await admin.graphql(`#graphql
+      query checkProductsAccess {
+        products(first: 10, query: "status:ACTIVE") {
+          edges {
+            node {
+              id
+            }
+          }
+        }
+      }
+    `);
+    const prodJson = await prodRes.json();
+    if (!prodJson.errors) {
+      productsAccessible = true;
+      productCount = (prodJson.data?.products?.edges || []).length;
+      if (productCount === 0) {
+        missingRequirements.push("Store has 0 active products. Add or publish products in Shopify Admin to run offer checks.");
+      }
+    } else {
+      missingRequirements.push(`Products query restricted: ${prodJson.errors[0]?.message || "GraphQL error"}`);
+    }
+  } catch (err: any) {
+    missingRequirements.push(`Products query failed: ${err.message || "Network error"}`);
+  }
+
+  // 2. Locations permissions
+  try {
+    const locRes = await admin.graphql(LOCATIONS_QUERY, { variables: { first: 5 } });
+    const locJson = await locRes.json();
+    if (!locJson.errors) {
+      locationsAccessible = true;
+      locationCount = (locJson.data?.locations?.edges || []).length;
+      if (locationCount === 0) {
+        missingRequirements.push("No store fulfillment locations found. Configure at least one active location in Shopify Settings.");
+      }
+    } else {
+      missingRequirements.push(`Locations query restricted: ${locJson.errors[0]?.message || "GraphQL error"}`);
+    }
+  } catch (err: any) {
+    missingRequirements.push(`Locations query failed: ${err.message || "Network error"}`);
+  }
+
+  // 3. Discounts permissions
+  try {
+    const discRes = await admin.graphql(ACTIVE_DISCOUNTS_QUERY, { variables: { first: 5 } });
+    const discJson = await discRes.json();
+    if (!discJson.errors) {
+      discountsAccessible = true;
+    } else {
+      missingRequirements.push(`Discounts query restricted: ${discJson.errors[0]?.message || "Check read_discounts permission"}`);
+    }
+  } catch (err: any) {
+    missingRequirements.push(`Discounts query failed: ${err.message || "Network error"}`);
+  }
+
+  const isReady =
+    productsAccessible &&
+    productCount > 0 &&
+    locationsAccessible &&
+    locationCount > 0 &&
+    discountsAccessible;
+
+  return {
+    isReady,
+    productsAccessible,
+    productCount,
+    locationsAccessible,
+    locationCount,
+    discountsAccessible,
+    missingRequirements,
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 /**

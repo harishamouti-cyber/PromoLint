@@ -103,6 +103,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   // Check inventory level at chosen location
   let inventoryQuantity: number | null = null;
+  let hasInventoryRecord = true;
   const isInventoryTracked = offeredVariant.inventoryManagement === "SHOPIFY";
 
   if (isInventoryTracked && offeredVariant.inventoryItemId) {
@@ -112,6 +113,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       locationId
     );
     inventoryQuantity = invResult.available;
+    hasInventoryRecord = invResult.hasInventoryRecord;
   }
 
   // Check active store discounts
@@ -126,6 +128,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     currencyCode: offeredVariant.currencyCode,
     inventoryQuantity,
     inventoryTracked: isInventoryTracked,
+    hasInventoryRecord,
     locationName,
     minStockThreshold: settings.minStockThreshold,
     minMarginThreshold: settings.minMarginThreshold,
@@ -289,10 +292,10 @@ export default function NewOfferCheckScreen() {
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    1. Trigger Product (Cart Condition)
+                    1. Scenario Trigger Item (Baseline Condition)
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    The item a customer must add to their cart to qualify for the offer.
+                    The baseline item in your proposed promotion scenario. PromoLint is an admin audit tool and does not publish offers, inject cart conditions, or enforce storefront rules.
                   </Text>
 
                   <Select
@@ -348,7 +351,7 @@ export default function NewOfferCheckScreen() {
                     2. Offered Product (Proposed Incentive)
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    The product and variant presented as an upsell, bundle, or discounted reward.
+                    The product and variant evaluated as a proposed upsell, reward, or bundle incentive in this scenario.
                   </Text>
 
                   <Select
@@ -372,32 +375,55 @@ export default function NewOfferCheckScreen() {
                   )}
 
                   {selectedOfferedProduct && (
-                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
-                      <InlineStack gap="300" blockAlign="center">
-                        {(selectedOfferedVariant?.imageUrl || selectedOfferedProduct.imageUrl) && (
-                          <Thumbnail
-                            source={selectedOfferedVariant?.imageUrl || selectedOfferedProduct.imageUrl || ""}
-                            alt={selectedOfferedProduct.title}
-                            size="small"
-                          />
-                        )}
-                        <BlockStack gap="050">
-                          <Text as="span" variant="bodyMd" fontWeight="semibold">
-                            {selectedOfferedProduct.title}
-                          </Text>
-                          {selectedOfferedVariant && (
-                            <Text as="span" variant="bodySm" tone="subdued">
-                              Variant: {selectedOfferedVariant.title} • Current Price: {selectedOfferedVariant.currencyCode} {selectedOfferedVariant.price.toFixed(2)}
-                              {selectedOfferedVariant.unitCost !== null ? (
-                                ` • Unit Cost: ${selectedOfferedVariant.currencyCode} ${selectedOfferedVariant.unitCost.toFixed(2)}`
-                              ) : (
-                                " • (Unit cost not set in Shopify)"
-                              )}
-                            </Text>
+                    <BlockStack gap="300">
+                      <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                        <InlineStack gap="300" blockAlign="center">
+                          {(selectedOfferedVariant?.imageUrl || selectedOfferedProduct.imageUrl) && (
+                            <Thumbnail
+                              source={selectedOfferedVariant?.imageUrl || selectedOfferedProduct.imageUrl || ""}
+                              alt={selectedOfferedProduct.title}
+                              size="small"
+                            />
                           )}
-                        </BlockStack>
-                      </InlineStack>
-                    </Box>
+                          <BlockStack gap="050">
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              {selectedOfferedProduct.title}
+                            </Text>
+                            {selectedOfferedVariant && (
+                              <Text as="span" variant="bodySm" tone="subdued">
+                                Variant: {selectedOfferedVariant.title} • Current Price: {selectedOfferedVariant.currencyCode} {selectedOfferedVariant.price.toFixed(2)}
+                                {selectedOfferedVariant.unitCost !== null ? (
+                                  ` • Unit Cost: ${selectedOfferedVariant.currencyCode} ${selectedOfferedVariant.unitCost.toFixed(2)}`
+                                ) : (
+                                  " • (Unit cost not set in Shopify)"
+                                )}
+                              </Text>
+                            )}
+                          </BlockStack>
+                        </InlineStack>
+                      </Box>
+
+                      {/* First-Run Guidance for Missing Unit Cost */}
+                      {selectedOfferedVariant && selectedOfferedVariant.unitCost === null && (
+                        <Banner tone="warning" title="Missing Unit Cost in Shopify">
+                          <p>
+                            This variant has no unit cost configured in Shopify. Gross profit and margin cannot be estimated,
+                            and this offer cannot produce a Ready status. To enable profit calculations, set <strong>Cost per item</strong> under
+                            Products &gt; Variants in Shopify Admin.
+                          </p>
+                        </Banner>
+                      )}
+
+                      {/* Guidance for Untracked Inventory */}
+                      {selectedOfferedVariant && selectedOfferedVariant.inventoryManagement !== "SHOPIFY" && (
+                        <Banner tone="info" title="Untracked Inventory">
+                          <p>
+                            Inventory tracking is not enabled for this variant in Shopify. PromoLint will record this as an untracked
+                            item and will not constrain stock counts at your selected location.
+                          </p>
+                        </Banner>
+                      )}
+                    </BlockStack>
                   )}
                 </BlockStack>
               </Card>
@@ -446,7 +472,7 @@ export default function NewOfferCheckScreen() {
                     options={locationOptions}
                     value={locationId}
                     onChange={setLocationId}
-                    helpText="Stock availability will be audited for this location at check time."
+                    helpText="Point-in-time stock availability will be queried for this location upon running the check."
                     error={actionData?.errors?.locationId}
                   />
 
@@ -470,20 +496,25 @@ export default function NewOfferCheckScreen() {
                     How PromoLint Works
                   </Text>
                   <Text as="p" variant="bodySm">
-                    PromoLint performs an honest, multi-point audit before you launch your offer:
+                    PromoLint performs an honest, multi-point pre-launch audit:
                   </Text>
                   <ul style={{ margin: 0, paddingLeft: "16px", fontSize: "13px", lineHeight: "1.5" }}>
-                    <li>Calculates unit gross profit & margin.</li>
-                    <li>Checks live inventory at the selected location.</li>
-                    <li>Inspects active store discounts for stacking rules.</li>
+                    <li>Estimates unit gross profit & margin using live catalog prices and unit costs.</li>
+                    <li>Audits point-in-time stock levels at your chosen location.</li>
+                    <li>Checks active store discount combination permissions.</li>
                   </ul>
                   <Divider />
                   <Text as="h3" variant="headingSm">
-                    Profit Estimate Notice
+                    Advisory Scope & Disclaimers
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Profit calculations estimate gross margin based on catalog price and unit cost.
-                    Shipping, taxes, payment fees, returns, and operating costs are excluded.
+                    • <strong>Exclusions:</strong> Shipping fees, sales taxes, payment gateway processing fees (e.g. 2.9% + 30¢), packaging, and customer returns are excluded from gross profit calculations.
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    • <strong>Discount Findings:</strong> Discount findings inspect combination rules configured in Shopify. Shopper eligibility, cart items, and Shopify checkout logic determine actual final prices.
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    • <strong>No Storefront Changes:</strong> PromoLint is an admin audit tool and does not publish promotions, modify themes, or change checkout.
                   </Text>
                 </BlockStack>
               </Card>
