@@ -8,6 +8,7 @@ import {
   evaluateOfferCheck,
   roundToCents,
   roundPercentage,
+  getStructuredFindingDetails,
 } from "./offer-analyzer";
 
 describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
@@ -622,6 +623,61 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       expect(result.unitCost).toBe(40);
       expect(result.estimatedGrossProfit).toBe(50);
       expect(result.costSource).toContain("Merchant manual cost assumption");
+    });
+  });
+
+  describe("Structured Finding Architecture (P1.8)", () => {
+    it("ensures all generated warnings possess the four structured sections", () => {
+      const evaluation = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: null, // triggers MISSING_PRODUCT_COST
+        discountType: "PERCENTAGE",
+        discountValue: 20,
+        inventoryQuantity: 2, // triggers LOW_STOCK_THRESHOLD
+        inventoryTracked: true,
+        locationName: "East Warehouse",
+        minStockThreshold: 10,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [
+            {
+              id: "gid://shopify/DiscountCodeNode/1",
+              title: "VIP10",
+              status: "ACTIVE",
+              combinesWith: {
+                orderDiscounts: true,
+                productDiscounts: true,
+                shippingDiscounts: true,
+              },
+            },
+          ],
+        },
+      });
+
+      expect(evaluation.warnings.length).toBeGreaterThan(0);
+
+      for (const warning of evaluation.warnings) {
+        const structured = getStructuredFindingDetails(warning);
+        expect(structured.whatWasChecked).toBeTruthy();
+        expect(structured.dataUsed).toBeTruthy();
+        expect(structured.whyItMatters).toBeTruthy();
+        expect(structured.nextStep).toBeTruthy();
+      }
+    });
+
+    it("falls back gracefully for custom or unknown warning codes", () => {
+      const details = getStructuredFindingDetails({
+        code: "CUSTOM_UNKNOWN_CODE",
+        message: "A custom test warning message.",
+        severity: "WARNING",
+        findingLevel: "Review",
+      });
+
+      expect(details.whatWasChecked).toBe("Pre-launch offer parameters");
+      expect(details.dataUsed).toBe("A custom test warning message.");
+      expect(details.whyItMatters).toBe("Potential issue identified during automated pre-flight quality check.");
+      expect(details.nextStep).toBe("Review offer parameters before publishing.");
     });
   });
 });

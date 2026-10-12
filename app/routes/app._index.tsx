@@ -20,6 +20,7 @@ import {
 import { authenticate } from "../shopify.server";
 import { getRecentOfferChecks, getOfferCheckMetrics } from "../services/checks.server";
 import { checkStoreReadiness } from "../services/shopify-catalog.server";
+import { PROMO_LINT_EMPTY_STATE_IMAGE } from "../components/empty-state-illustration";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
@@ -61,6 +62,7 @@ export default function HomeScreen() {
 
   return (
     <Page
+      fullWidth
       title="PromoLint"
       subtitle="Catch offer problems before they reach checkout."
       primaryAction={{
@@ -353,7 +355,7 @@ export default function HomeScreen() {
                       content: "Configure settings",
                       onAction: () => navigate("/app/settings"),
                     }}
-                    image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                    image={PROMO_LINT_EMPTY_STATE_IMAGE}
                   >
                     <p>
                       Simulate a proposed promotion to inspect estimated profit, current stock availability,

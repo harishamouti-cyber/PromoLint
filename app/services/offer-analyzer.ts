@@ -16,11 +16,180 @@ export type InventoryState =
   | "NOT_TRACKED"
   | "UNABLE_TO_VERIFY";
 
+export interface StructuredFindingDetails {
+  whatWasChecked: string;
+  dataUsed: string;
+  whyItMatters: string;
+  nextStep: string;
+}
+
 export interface OfferWarning {
   code: string;
   message: string;
   severity: WarningSeverity;
   findingLevel: FindingLevel;
+  whatWasChecked?: string;
+  dataUsed?: string;
+  whyItMatters?: string;
+  nextStep?: string;
+}
+
+export function getStructuredFindingDetails(
+  warningOrCode: OfferWarning | string,
+  fallbackMessage?: string
+): StructuredFindingDetails {
+  if (typeof warningOrCode === "object" && warningOrCode !== null) {
+    if (
+      warningOrCode.whatWasChecked &&
+      warningOrCode.dataUsed &&
+      warningOrCode.whyItMatters &&
+      warningOrCode.nextStep
+    ) {
+      return {
+        whatWasChecked: warningOrCode.whatWasChecked,
+        dataUsed: warningOrCode.dataUsed,
+        whyItMatters: warningOrCode.whyItMatters,
+        nextStep: warningOrCode.nextStep,
+      };
+    }
+    return getStructuredFindingDetails(warningOrCode.code, warningOrCode.message || fallbackMessage);
+  }
+
+  const code = warningOrCode;
+  switch (code) {
+    case "FREE_OR_NEGATIVE_PRICE":
+      return {
+        whatWasChecked: "Promotional discount boundary vs selling price",
+        dataUsed: "Catalog unit price and proposed discount value",
+        whyItMatters: "Discount meets or exceeds 100% of product price, resulting in a free giveaway ($0.00) or negative selling price.",
+        nextStep: "Lower the discount percentage or set a positive promotional price.",
+      };
+    case "DISCOUNT_EXCEEDS_PRICE":
+      return {
+        whatWasChecked: "Fixed discount amount vs catalog unit price",
+        dataUsed: "Catalog unit price and fixed discount amount per unit",
+        whyItMatters: "The fixed discount per unit meets or exceeds catalog price, resulting in $0.00 selling price.",
+        nextStep: "Lower the fixed discount amount below the catalog price.",
+      };
+    case "OFFER_PRICE_EXCEEDS_CATALOG":
+      return {
+        whatWasChecked: "Fixed offer price vs catalog unit price",
+        dataUsed: "Catalog unit price and proposed promotional price",
+        whyItMatters: "Proposed price is greater than or equal to the normal catalog price, so shoppers receive no discount incentive.",
+        nextStep: "Adjust the promotional price lower than catalog price if an incentive is intended.",
+      };
+    case "MISSING_PRODUCT_COST":
+      return {
+        whatWasChecked: "Shopify variant unit cost (inventoryItem.unitCost)",
+        dataUsed: "Shopify Admin product catalog record for this variant",
+        whyItMatters: "PromoLint adheres to zero-mock reporting. Without a unit cost, gross profit and gross margin cannot be calculated, creating financial blind spots.",
+        nextStep: "In Shopify Admin > Products, open this variant and enter a 'Cost per item' under Pricing, or provide an advisory cost assumption in PromoLint.",
+      };
+    case "MANUAL_COST_ASSUMPTION_USED":
+      return {
+        whatWasChecked: "Unit cost source for gross profit calculations",
+        dataUsed: "Merchant manual cost assumption entered during check creation",
+        whyItMatters: "Calculations reflect your entered assumption rather than a verified Shopify unit cost. This assumption is not stored in Shopify.",
+        nextStep: "When convenient, record the verified unit cost in Shopify Admin > Products for permanent tracking.",
+      };
+    case "SELLING_BELOW_COST":
+      return {
+        whatWasChecked: "Discounted selling price vs product unit cost",
+        dataUsed: "Calculated selling price and unit cost (Shopify or manual assumption)",
+        whyItMatters: "Every unit sold at this price creates a direct gross loss before accounting for shipping, taxes, or payment fees.",
+        nextStep: "Decrease the discount or raise the promotional price to cover unit cost.",
+      };
+    case "MARGIN_BELOW_THRESHOLD":
+      return {
+        whatWasChecked: "Estimated gross margin % vs advisory preference threshold",
+        dataUsed: "Estimated selling price, unit cost, and configured margin threshold",
+        whyItMatters: "The offer is profitable but compresses gross margin below your store's advisory target benchmark.",
+        nextStep: "Review your margin target in Settings or test smaller discount tiers using the Duplicate check action.",
+      };
+    case "INVENTORY_NOT_TRACKED":
+      return {
+        whatWasChecked: "Shopify inventory tracking setting for this variant",
+        dataUsed: "Shopify variant inventoryItem.tracked status",
+        whyItMatters: "Untracked inventory is not monitored by Shopify and cannot be verified for physical availability at the selected location.",
+        nextStep: "If this product has physical stock, enable 'Track quantity' in Shopify Admin > Products > Variants and assign stock counts.",
+      };
+    case "INVENTORY_RECORD_MISSING":
+      return {
+        whatWasChecked: "Location inventory level record in Shopify",
+        dataUsed: "Shopify inventoryLevel query at the selected fulfillment location",
+        whyItMatters: "No inventory record exists for this variant at the chosen location. Physical stock availability cannot be confirmed.",
+        nextStep: "In Shopify Admin > Products > Inventory, assign this variant to your fulfillment location.",
+      };
+    case "INVENTORY_UNAVAILABLE":
+      return {
+        whatWasChecked: "Real-time stock quantity query via Shopify Admin API",
+        dataUsed: "Shopify Admin GraphQL inventory query response",
+        whyItMatters: "The inventory level could not be read. Availability cannot be verified.",
+        nextStep: "Click 'Recheck current data' to refresh inventory once API connectivity stabilizes.",
+      };
+    case "OUT_OF_STOCK":
+      return {
+        whatWasChecked: "Available stock count at the selected fulfillment location",
+        dataUsed: "Point-in-time available quantity at check timestamp",
+        whyItMatters: "Stock is 0 (or negative oversold). Running an active promotion risks unfulfillable orders and customer backorders.",
+        nextStep: "Restock this variant at the selected fulfillment location before launching the offer.",
+      };
+    case "INSUFFICIENT_STOCK_FOR_QUANTITY":
+      return {
+        whatWasChecked: "Available stock count vs scenario bundle quantity",
+        dataUsed: "Available inventory at selected location and offer quantity",
+        whyItMatters: "Available stock is less than the quantity required for a single bundle order in this scenario.",
+        nextStep: "Restock inventory at this location or adjust the bundle quantity.",
+      };
+    case "LOW_STOCK_THRESHOLD":
+      return {
+        whatWasChecked: "Available inventory count vs advisory stock threshold",
+        dataUsed: "Available stock at selected location and configured threshold",
+        whyItMatters: "Stock is available but below your advisory threshold. High promotional demand could quickly exhaust remaining inventory.",
+        nextStep: "Confirm warehouse replenishment timelines or adjust your advisory threshold in Settings.",
+      };
+    case "DISCOUNT_CHECK_UNAVAILABLE":
+      return {
+        whatWasChecked: "Active store discount query and combination rules",
+        dataUsed: "Shopify Admin GraphQL read_discounts query",
+        whyItMatters: "Store discount nodes could not be queried. Existing discounts and stacking permissions could not be evaluated.",
+        nextStep: "Ensure the app has read_discounts permission granted and click 'Recheck current data'.",
+      };
+    case "STACKABLE_DISCOUNTS_DETECTED":
+      return {
+        whatWasChecked: "Combination permissions (combinesWith) on active discounts",
+        dataUsed: "Active Shopify discount codes and automatic discounts",
+        whyItMatters: "One or more active discounts permit combinations with product or order discounts, creating risk of unintended stacking at checkout.",
+        nextStep: "Review discount combination permissions in Shopify Admin > Discounts to verify whether stacking is intended.",
+      };
+    default:
+      return {
+        whatWasChecked: "Pre-launch offer parameters",
+        dataUsed: fallbackMessage || "Shopify catalog and scenario inputs",
+        whyItMatters: "Potential issue identified during automated pre-flight quality check.",
+        nextStep: "Review offer parameters before publishing.",
+      };
+  }
+}
+
+export function createOfferWarning(
+  code: string,
+  message: string,
+  severity: WarningSeverity,
+  findingLevel: FindingLevel,
+  customDetails?: Partial<StructuredFindingDetails>
+): OfferWarning {
+  const structured = getStructuredFindingDetails(code, message);
+  return {
+    code,
+    message,
+    severity,
+    findingLevel,
+    whatWasChecked: customDetails?.whatWasChecked || structured.whatWasChecked,
+    dataUsed: customDetails?.dataUsed || structured.dataUsed,
+    whyItMatters: customDetails?.whyItMatters || structured.whyItMatters,
+    nextStep: customDetails?.nextStep || structured.nextStep,
+  };
 }
 
 export interface BreakEvenResult {
@@ -245,34 +414,42 @@ export function calculateProfit(
 
   // Validate discount boundaries
   if (discountType === "PERCENTAGE" && discountValue >= 100) {
-    warnings.push({
-      code: "FREE_OR_NEGATIVE_PRICE",
-      message: "Proposed discount is 100% or greater, resulting in a $0.00 selling price.",
-      severity: "BLOCKER",
-      findingLevel: "Warning",
-    });
+    warnings.push(
+      createOfferWarning(
+        "FREE_OR_NEGATIVE_PRICE",
+        "Proposed discount is 100% or greater, resulting in a $0.00 selling price.",
+        "BLOCKER",
+        "Warning"
+      )
+    );
   } else if (discountType === "FIXED_AMOUNT" && discountValue >= currentPrice) {
-    warnings.push({
-      code: "DISCOUNT_EXCEEDS_PRICE",
-      message: `Proposed fixed discount (${discountValue}) meets or exceeds the current product price (${currentPrice}), resulting in a $0.00 selling price.`,
-      severity: "BLOCKER",
-      findingLevel: "Warning",
-    });
+    warnings.push(
+      createOfferWarning(
+        "DISCOUNT_EXCEEDS_PRICE",
+        `Proposed fixed discount (${discountValue}) meets or exceeds the current product price (${currentPrice}), resulting in a $0.00 selling price.`,
+        "BLOCKER",
+        "Warning"
+      )
+    );
   } else if (discountType === "FIXED_PRICE") {
     if (discountValue <= 0) {
-      warnings.push({
-        code: "FREE_OR_NEGATIVE_PRICE",
-        message: "Proposed offer price is $0.00 or negative, resulting in a free giveaway.",
-        severity: "BLOCKER",
-        findingLevel: "Warning",
-      });
+      warnings.push(
+        createOfferWarning(
+          "FREE_OR_NEGATIVE_PRICE",
+          "Proposed offer price is $0.00 or negative, resulting in a free giveaway.",
+          "BLOCKER",
+          "Warning"
+        )
+      );
     } else if (discountValue >= currentPrice) {
-      warnings.push({
-        code: "OFFER_PRICE_EXCEEDS_CATALOG",
-        message: `Proposed offer price (${discountValue}) meets or exceeds the current catalog price (${currentPrice}). No discount incentive is provided in this scenario.`,
-        severity: "INFO",
-        findingLevel: "Good to know",
-      });
+      warnings.push(
+        createOfferWarning(
+          "OFFER_PRICE_EXCEEDS_CATALOG",
+          `Proposed offer price (${discountValue}) meets or exceeds the current catalog price (${currentPrice}). No discount incentive is provided in this scenario.`,
+          "INFO",
+          "Good to know"
+        )
+      );
     }
   }
 
@@ -301,20 +478,23 @@ export function calculateProfit(
     effectiveUnitCost = roundToCents(customCostAssumption);
     costSource = `Merchant manual cost assumption (${effectiveUnitCost}) — Not recorded in Shopify`;
     costMissing = false;
-    warnings.push({
-      code: "MANUAL_COST_ASSUMPTION_USED",
-      message: `Gross profit calculations use your merchant-entered cost assumption of ${effectiveUnitCost} per unit. This cost assumption is not verified or saved in Shopify.`,
-      severity: "INFO",
-      findingLevel: "Good to know",
-    });
+    warnings.push(
+      createOfferWarning(
+        "MANUAL_COST_ASSUMPTION_USED",
+        `Gross profit calculations use your merchant-entered cost assumption of ${effectiveUnitCost} per unit. This cost assumption is not verified or saved in Shopify.`,
+        "INFO",
+        "Good to know"
+      )
+    );
   } else {
-    warnings.push({
-      code: "MISSING_PRODUCT_COST",
-      message:
+    warnings.push(
+      createOfferWarning(
+        "MISSING_PRODUCT_COST",
         "Profit can’t be estimated because no unit cost is recorded in Shopify for this variant. To provide a cost, open Shopify Admin > Products, select the variant, and enter a Cost per item under Pricing, or provide a cost assumption.",
-      severity: "WARNING",
-      findingLevel: "Unable to verify",
-    });
+        "WARNING",
+        "Unable to verify"
+      )
+    );
 
     const totalRevenue = roundToCents(discountedPrice * safeQuantity);
     return {
@@ -342,19 +522,23 @@ export function calculateProfit(
   }
 
   if (grossProfit < 0) {
-    warnings.push({
-      code: "SELLING_BELOW_COST",
-      message: `Offer sells below product unit cost. Estimated gross loss is ${Math.abs(grossProfit)} per unit.`,
-      severity: "BLOCKER",
-      findingLevel: "Warning",
-    });
+    warnings.push(
+      createOfferWarning(
+        "SELLING_BELOW_COST",
+        `Offer sells below product unit cost. Estimated gross loss is ${Math.abs(grossProfit)} per unit.`,
+        "BLOCKER",
+        "Warning"
+      )
+    );
   } else if (grossMargin !== null && grossMargin < minMarginThreshold) {
-    warnings.push({
-      code: "MARGIN_BELOW_THRESHOLD",
-      message: `Estimated gross margin is ${grossMargin}%, which is below your configured merchant preference threshold of ${minMarginThreshold}%.`,
-      severity: "WARNING",
-      findingLevel: "Review",
-    });
+    warnings.push(
+      createOfferWarning(
+        "MARGIN_BELOW_THRESHOLD",
+        `Estimated gross margin is ${grossMargin}%, which is below your configured merchant preference threshold of ${minMarginThreshold}%.`,
+        "WARNING",
+        "Review"
+      )
+    );
   }
 
   // Multi-unit totals for bundle and multi-item audits
@@ -395,12 +579,14 @@ export function analyzeInventory(
 
   // State 1: Untracked in Shopify
   if (!isTracked) {
-    warnings.push({
-      code: "INVENTORY_NOT_TRACKED",
-      message: `Inventory tracking is disabled for this variant in Shopify. PromoLint records this as untracked. Untracked inventory does not mean unlimited stock; physical availability cannot be verified or constrained at ${locationName}.`,
-      severity: "INFO",
-      findingLevel: "Good to know",
-    });
+    warnings.push(
+      createOfferWarning(
+        "INVENTORY_NOT_TRACKED",
+        `Inventory tracking is disabled for this variant in Shopify. PromoLint records this as untracked. Untracked inventory does not mean unlimited stock; physical availability cannot be verified or constrained at ${locationName}.`,
+        "INFO",
+        "Good to know"
+      )
+    );
 
     return {
       quantity: null,
@@ -413,12 +599,14 @@ export function analyzeInventory(
 
   // State 2: Missing inventory record at location -> Unable to verify
   if (hasInventoryRecord === false) {
-    warnings.push({
-      code: "INVENTORY_RECORD_MISSING",
-      message: `No inventory record exists for this variant at ${locationName}. Stock level is unable to verify for this location. Do not assume stock is available.`,
-      severity: "WARNING",
-      findingLevel: "Unable to verify",
-    });
+    warnings.push(
+      createOfferWarning(
+        "INVENTORY_RECORD_MISSING",
+        `No inventory record exists for this variant at ${locationName}. Stock level is unable to verify for this location. Do not assume stock is available.`,
+        "WARNING",
+        "Unable to verify"
+      )
+    );
 
     return {
       quantity: null,
@@ -431,12 +619,14 @@ export function analyzeInventory(
 
   // State 3: Inventory level query error or unreadable -> Unable to verify
   if (quantity === null || quantity === undefined) {
-    warnings.push({
-      code: "INVENTORY_UNAVAILABLE",
-      message: `Inventory level could not be retrieved from Shopify API for ${locationName}. Stock level is unable to verify. Do not assume stock is available.`,
-      severity: "WARNING",
-      findingLevel: "Unable to verify",
-    });
+    warnings.push(
+      createOfferWarning(
+        "INVENTORY_UNAVAILABLE",
+        `Inventory level could not be retrieved from Shopify API for ${locationName}. Stock level is unable to verify. Do not assume stock is available.`,
+        "WARNING",
+        "Unable to verify"
+      )
+    );
 
     return {
       quantity: null,
@@ -450,14 +640,16 @@ export function analyzeInventory(
   // State 4: Out of stock (0 or negative oversold)
   if (quantity <= 0) {
     const isZero = quantity === 0;
-    warnings.push({
-      code: "OUT_OF_STOCK",
-      message: isZero
-        ? `Variant has 0 units available at ${locationName} (out of stock). Launching an offer with zero stock risks unfulfillable orders.`
-        : `Variant has negative inventory (${quantity} units) at ${locationName} (oversold). Launching an offer with negative stock risks fulfillment failures.`,
-      severity: "BLOCKER",
-      findingLevel: "Warning",
-    });
+    warnings.push(
+      createOfferWarning(
+        "OUT_OF_STOCK",
+        isZero
+          ? `Variant has 0 units available at ${locationName} (out of stock). Launching an offer with zero stock risks unfulfillable orders.`
+          : `Variant has negative inventory (${quantity} units) at ${locationName} (oversold). Launching an offer with negative stock risks fulfillment failures.`,
+        "BLOCKER",
+        "Warning"
+      )
+    );
 
     return {
       quantity,
@@ -470,12 +662,14 @@ export function analyzeInventory(
 
   // Check if stock is insufficient for the requested multi-unit bundle quantity
   if (quantity < safeOfferQty) {
-    warnings.push({
-      code: "INSUFFICIENT_STOCK_FOR_QUANTITY",
-      message: `Selected location has only ${quantity} units available, which is less than the scenario offer quantity of ${safeOfferQty} units. Fulfilling an order for this bundle will exhaust or oversell inventory at ${locationName}.`,
-      severity: "BLOCKER",
-      findingLevel: "Warning",
-    });
+    warnings.push(
+      createOfferWarning(
+        "INSUFFICIENT_STOCK_FOR_QUANTITY",
+        `Selected location has only ${quantity} units available, which is less than the scenario offer quantity of ${safeOfferQty} units. Fulfilling an order for this bundle will exhaust or oversell inventory at ${locationName}.`,
+        "BLOCKER",
+        "Warning"
+      )
+    );
 
     return {
       quantity,
@@ -488,12 +682,14 @@ export function analyzeInventory(
 
   // State 5: Low stock below merchant-configured threshold
   if (quantity < minStockThreshold) {
-    warnings.push({
-      code: "LOW_STOCK_THRESHOLD",
-      message: `Low inventory: Only ${quantity} units observed at ${locationName}, which is below your configured merchant preference threshold of ${minStockThreshold} units. This stock figure applies strictly to ${locationName}.`,
-      severity: "WARNING",
-      findingLevel: "Review",
-    });
+    warnings.push(
+      createOfferWarning(
+        "LOW_STOCK_THRESHOLD",
+        `Low inventory: Only ${quantity} units observed at ${locationName}, which is below your configured merchant preference threshold of ${minStockThreshold} units. This stock figure applies strictly to ${locationName}.`,
+        "WARNING",
+        "Review"
+      )
+    );
 
     return {
       quantity,
@@ -529,12 +725,14 @@ export function analyzeDiscounts(
 
   if (!discountData || !discountData.available) {
     const reason = discountData?.unavailableReason || "Store discounts could not be queried or read_discounts permission is missing.";
-    warnings.push({
-      code: "DISCOUNT_CHECK_UNAVAILABLE",
-      message: `Unable to verify active store discounts: ${reason}. Existing discounts and combination rules could not be audited.`,
-      severity: "WARNING",
-      findingLevel: "Unable to verify",
-    });
+    warnings.push(
+      createOfferWarning(
+        "DISCOUNT_CHECK_UNAVAILABLE",
+        `Unable to verify active store discounts: ${reason}. Existing discounts and combination rules could not be audited.`,
+        "WARNING",
+        "Unable to verify"
+      )
+    );
 
     return {
       available: false,
@@ -556,12 +754,14 @@ export function analyzeDiscounts(
 
   if (stackableDiscounts.length > 0) {
     const sampleTitles = stackableDiscounts.slice(0, 3).map((d) => `"${d.title}"`).join(", ");
-    warnings.push({
-      code: "STACKABLE_DISCOUNTS_DETECTED",
-      message: `${stackableDiscounts.length} active store discount(s) have combination permissions enabled (${sampleTitles}). Shoppers might combine additional discounts at checkout. Note: PromoLint audits configured store combination rules only; checking combination settings does not predict final checkout totals, customer eligibility, or automated discount priority at checkout.`,
-      severity: "WARNING",
-      findingLevel: "Review",
-    });
+    warnings.push(
+      createOfferWarning(
+        "STACKABLE_DISCOUNTS_DETECTED",
+        `${stackableDiscounts.length} active store discount(s) have combination permissions enabled (${sampleTitles}). Shoppers might combine additional discounts at checkout. Note: PromoLint audits configured store combination rules only; checking combination settings does not predict final checkout totals, customer eligibility, or automated discount priority at checkout.`,
+        "WARNING",
+        "Review"
+      )
+    );
   }
 
   return {

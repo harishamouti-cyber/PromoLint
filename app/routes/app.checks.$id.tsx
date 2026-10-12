@@ -18,7 +18,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { getOfferCheckById, deleteOfferCheck, recheckExistingOfferCheck } from "../services/checks.server";
-import type { OfferWarning } from "../services/offer-analyzer";
+import { type OfferWarning, getStructuredFindingDetails } from "../services/offer-analyzer";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -177,6 +177,7 @@ export default function CheckResultDetailScreen() {
 
   return (
     <Page
+      fullWidth
       title="Offer Check Result"
       subtitle={`Point-in-time snapshot captured on ${new Date(check.createdAt).toLocaleString(undefined, {
         dateStyle: "medium",
@@ -659,30 +660,107 @@ export default function CheckResultDetailScreen() {
               </BlockStack>
             </Card>
 
-            {/* Audit Findings & Warnings (Requirement 10) */}
+            {/* Audit Findings & Warnings (Requirements 10 & 28, P1.8) */}
             <Card>
               <BlockStack gap="400">
-                <Text as="h2" variant="headingMd">
-                  Audit Findings ({warnings.length})
-                </Text>
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">
+                    Audit Findings ({warnings.length})
+                  </Text>
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Structured pre-flight findings & recommendations
+                  </Text>
+                </InlineStack>
 
                 {warnings.length === 0 ? (
-                  <Text as="p" variant="bodyMd" tone="success">
-                    ✓ No warnings or conflicts identified during this pre-flight check.
-                  </Text>
+                  <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                    <Text as="p" variant="bodyMd" tone="success">
+                      ✓ No warnings or conflicts identified during this pre-flight check.
+                    </Text>
+                  </Box>
                 ) : (
-                  <List type="bullet">
-                    {warnings.map((w, idx) => (
-                      <List.Item key={idx}>
-                        <InlineStack gap="200" blockAlign="start">
-                          {renderFindingLevelBadge(w)}
-                          <Text as="span" variant="bodyMd">
-                            {w.message}
-                          </Text>
-                        </InlineStack>
-                      </List.Item>
-                    ))}
-                  </List>
+                  <BlockStack gap="300">
+                    {warnings.map((w, idx) => {
+                      const details = getStructuredFindingDetails(w);
+                      return (
+                        <Box
+                          key={idx}
+                          padding="400"
+                          background="bg-surface-secondary"
+                          borderRadius="200"
+                        >
+                          <BlockStack gap="200">
+                            <InlineStack gap="200" blockAlign="center">
+                              {renderFindingLevelBadge(w)}
+                              <Text as="span" variant="headingSm">
+                                {w.code.replace(/_/g, " ")}
+                              </Text>
+                            </InlineStack>
+
+                            <Text as="p" variant="bodyMd" fontWeight="semibold">
+                              {w.message}
+                            </Text>
+
+                            <Divider />
+
+                            <BlockStack gap="150">
+                              <InlineStack gap="200" blockAlign="start">
+                                <Box minWidth="150px">
+                                  <Text as="span" variant="bodySm" fontWeight="semibold">
+                                    What was checked:
+                                  </Text>
+                                </Box>
+                                <Box width="100%">
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    {details.whatWasChecked}
+                                  </Text>
+                                </Box>
+                              </InlineStack>
+
+                              <InlineStack gap="200" blockAlign="start">
+                                <Box minWidth="150px">
+                                  <Text as="span" variant="bodySm" fontWeight="semibold">
+                                    Data used:
+                                  </Text>
+                                </Box>
+                                <Box width="100%">
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    {details.dataUsed}
+                                  </Text>
+                                </Box>
+                              </InlineStack>
+
+                              <InlineStack gap="200" blockAlign="start">
+                                <Box minWidth="150px">
+                                  <Text as="span" variant="bodySm" fontWeight="semibold">
+                                    Why it matters:
+                                  </Text>
+                                </Box>
+                                <Box width="100%">
+                                  <Text as="span" variant="bodySm" tone="subdued">
+                                    {details.whyItMatters}
+                                  </Text>
+                                </Box>
+                              </InlineStack>
+
+                              <InlineStack gap="200" blockAlign="start">
+                                <Box minWidth="150px">
+                                  <Text as="span" variant="bodySm" fontWeight="semibold" tone="success">
+                                    Practical next step:
+                                  </Text>
+                                </Box>
+                                <Box width="100%">
+                                  <Text as="span" variant="bodySm">
+                                    {details.nextStep}
+                                  </Text>
+                                </Box>
+                              </InlineStack>
+                            </BlockStack>
+                          </BlockStack>
+                        </Box>
+                      );
+                    })}
+                  </BlockStack>
                 )}
               </BlockStack>
             </Card>

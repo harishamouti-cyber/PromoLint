@@ -98,6 +98,7 @@ export default function SettingsScreen() {
 
   return (
     <Page
+      fullWidth
       title="Settings"
       subtitle="Configure audit thresholds and default inventory location for PromoLint."
       backAction={{ content: "Home", onAction: () => navigate("/app") }}

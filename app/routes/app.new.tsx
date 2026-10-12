@@ -277,6 +277,8 @@ export default function NewOfferCheckScreen() {
       unitGrossProfit !== null && unitSellingPrice > 0
         ? (unitGrossProfit / unitSellingPrice) * 100
         : null;
+    const totalCost = effectiveCost !== null ? effectiveCost * parsedQty : null;
+    const totalGrossProfit = unitGrossProfit !== null ? unitGrossProfit * parsedQty : null;
 
     return {
       currentPrice,
@@ -285,6 +287,8 @@ export default function NewOfferCheckScreen() {
       effectiveCost,
       unitGrossProfit,
       grossMargin,
+      totalCost,
+      totalGrossProfit,
       breakEven,
       quantity: parsedQty,
     };
@@ -363,6 +367,7 @@ export default function NewOfferCheckScreen() {
 
   return (
     <Page
+      fullWidth
       title="Check an offer"
       subtitle="Configure your trigger condition, proposed offered item, discount parameters, and bundle quantity."
       backAction={{ content: "Home", onAction: () => navigate("/app") }}
@@ -614,8 +619,8 @@ export default function NewOfferCheckScreen() {
                         name="discountType"
                         options={[
                           { label: "Percentage Off (%)", value: "PERCENTAGE" },
-                          { label: "Fixed Amount Off ($)", value: "FIXED_AMOUNT" },
-                          { label: "Fixed Offer Price ($)", value: "FIXED_PRICE" },
+                          { label: "Fixed Amount Off Per Unit ($)", value: "FIXED_AMOUNT" },
+                          { label: "Fixed Offer Price Per Unit ($)", value: "FIXED_PRICE" },
                         ]}
                         value={discountType}
                         onChange={(val) => setDiscountType(val as DiscountType)}
@@ -626,10 +631,10 @@ export default function NewOfferCheckScreen() {
                       <TextField
                         label={
                           discountType === "PERCENTAGE"
-                            ? "Discount Percentage (%)"
+                            ? "Discount Percentage Per Unit (%)"
                             : discountType === "FIXED_AMOUNT"
-                            ? "Fixed Amount Off ($)"
-                            : "Fixed Offer Price ($)"
+                            ? "Fixed Discount Amount Per Unit ($)"
+                            : "Fixed Offer Price Per Unit ($)"
                         }
                         name="discountValue"
                         type="number"
@@ -638,10 +643,10 @@ export default function NewOfferCheckScreen() {
                         autoComplete="off"
                         helpText={
                           discountType === "PERCENTAGE"
-                            ? "E.g. 20 for 20% off"
+                            ? "E.g. 20 for 20% off per unit"
                             : discountType === "FIXED_AMOUNT"
-                            ? "E.g. 5.00 for $5.00 off"
-                            : "E.g. 15.00 for a $15.00 offer price"
+                            ? "E.g. 5.00 for $5.00 off per unit"
+                            : "E.g. 15.00 for a $15.00 promotional price per unit"
                         }
                         error={actionData?.errors?.discountValue}
                       />
@@ -687,7 +692,7 @@ export default function NewOfferCheckScreen() {
                             <Text as="span" variant="bodyXs" tone="subdued">Catalog Price</Text>
                             <br />
                             <Text as="span" variant="bodyMd" fontWeight="semibold">
-                              ${previewData.currentPrice.toFixed(2)}
+                              ${previewData.currentPrice.toFixed(2)} / unit
                             </Text>
                           </Box>
                           <Box minWidth="160px">
@@ -697,12 +702,24 @@ export default function NewOfferCheckScreen() {
                               ${previewData.unitSellingPrice.toFixed(2)} / unit
                             </Text>
                           </Box>
+                          <Box minWidth="160px">
+                            <Text as="span" variant="bodyXs" tone="subdued">Est. Gross Profit (Unit)</Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              {previewData.unitGrossProfit !== null
+                                ? `$${previewData.unitGrossProfit.toFixed(2)} (${previewData.grossMargin?.toFixed(1)}%)`
+                                : "Requires unit cost"}
+                            </Text>
+                          </Box>
                           {previewData.quantity > 1 && (
-                            <Box minWidth="160px">
-                              <Text as="span" variant="bodyXs" tone="subdued">Bundle Revenue ({previewData.quantity} units)</Text>
+                            <Box minWidth="180px">
+                              <Text as="span" variant="bodyXs" tone="subdued">
+                                Bundle Revenue ({previewData.quantity} units)
+                              </Text>
                               <br />
                               <Text as="span" variant="bodyMd" fontWeight="semibold">
                                 ${previewData.totalRevenue.toFixed(2)} total
+                                {previewData.totalGrossProfit !== null ? ` (Profit: $${previewData.totalGrossProfit.toFixed(2)})` : ""}
                               </Text>
                             </Box>
                           )}

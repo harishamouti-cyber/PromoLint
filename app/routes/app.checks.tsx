@@ -19,6 +19,7 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { getRecentOfferChecks, deleteOfferCheck } from "../services/checks.server";
+import { PROMO_LINT_EMPTY_STATE_IMAGE } from "../components/empty-state-illustration";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -110,6 +111,7 @@ export default function OfferChecksListScreen() {
 
   return (
     <Page
+      fullWidth
       title="Offer checks"
       subtitle="History of all pre-launch promotion audits for this store."
       primaryAction={{
@@ -223,7 +225,7 @@ export default function OfferChecksListScreen() {
                     }
                   },
                 }}
-                image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
+                image={PROMO_LINT_EMPTY_STATE_IMAGE}
               >
                 <p>
                   {hasActiveFilters
