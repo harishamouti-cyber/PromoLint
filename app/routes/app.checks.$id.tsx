@@ -185,6 +185,11 @@ export default function CheckResultDetailScreen() {
       backAction={{ content: "Offer checks", onAction: () => navigate("/app/checks") }}
       secondaryActions={[
         {
+          content: "Print summary",
+          accessibilityLabel: "Print this offer audit summary or save as PDF",
+          onAction: () => window.print(),
+        },
+        {
           content: "Duplicate check",
           onAction: () => navigate(`/app/new?duplicateId=${check.id}`),
         },
@@ -195,20 +200,76 @@ export default function CheckResultDetailScreen() {
       ]}
     >
       <BlockStack gap="500">
+        <style>{`
+          @media print {
+            header[class*="Page-Header"],
+            .Polaris-Header-Title__TitleAndSubtitleWrapper button,
+            button[type="submit"],
+            .no-print {
+              display: none !important;
+            }
+            .print-only-header {
+              display: block !important;
+              margin-bottom: 20px;
+              border-bottom: 2px solid #333;
+              padding-bottom: 12px;
+            }
+            body {
+              background: #fff !important;
+              color: #000 !important;
+            }
+          }
+          @media screen {
+            .print-only-header {
+              display: none !important;
+            }
+          }
+        `}</style>
+
+        {/* Print-Only Header for PDF & Paper exports */}
+        <div className="print-only-header">
+          <Text as="h1" variant="headingXl">
+            PromoLint Offer Audit Report
+          </Text>
+          <Text as="p" variant="bodyMd">
+            Audit Snapshot ID: {check.id} | Store: {check.shop} | Captured: {new Date(check.createdAt).toLocaleString()}
+          </Text>
+          <Text as="p" variant="bodySm" tone="subdued">
+            Status: {check.status} | Scenario: {check.triggerProductTitle} ({check.triggerVariantTitle}) + {check.offeredProductTitle} ({check.offeredVariantTitle})
+          </Text>
+        </div>
+
         {getStatusBanner()}
 
-        {/* First-Run Guidance for Missing Unit Cost */}
+        {/* Contextual Guidance for Missing Unit Cost (Requirement 23) */}
         {check.unitCost === null && (
           <Banner tone="warning" title="Profit Can’t Be Estimated (Missing Unit Cost)">
             <p>
               Shopify has no unit cost recorded for this variant. Because PromoLint adheres to zero-mock calculations,
-              gross profit and margin cannot be fabricated. To unlock profit estimates on future checks:
+              gross profit and margin cannot be fabricated. To unlock profit estimates:
             </p>
             <ol style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
               <li>Open <strong>Shopify Admin &gt; Products</strong> and select this product.</li>
               <li>Scroll to <strong>Variants</strong> and click the variant.</li>
               <li>Enter a value in <strong>Cost per item</strong> under Pricing and click Save.</li>
               <li>Click <strong>Recheck current data</strong> below to generate an updated audit snapshot.</li>
+            </ol>
+          </Banner>
+        )}
+
+        {/* Contextual Guidance for Untracked Inventory (Requirement 23) */}
+        {check.inventoryTracked === false && (
+          <Banner tone="info" title="Inventory Tracking Disabled in Shopify">
+            <p>
+              Inventory tracking is disabled for this variant in Shopify. PromoLint classifies this as untracked and does not assume unlimited physical stock.
+              To monitor inventory counts:
+            </p>
+            <ol style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+              <li>Open <strong>Shopify Admin &gt; Products</strong> and click on this product.</li>
+              <li>Under <strong>Variants</strong>, click the variant.</li>
+              <li>Under <strong>Inventory</strong>, check <strong>Track quantity</strong>.</li>
+              <li>Assign stock counts to your fulfillment locations and click <strong>Save</strong>.</li>
+              <li>Click <strong>Recheck current data</strong> below to capture fresh inventory numbers.</li>
             </ol>
           </Banner>
         )}

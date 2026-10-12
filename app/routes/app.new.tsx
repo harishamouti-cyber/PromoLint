@@ -543,14 +543,23 @@ export default function NewOfferCheckScreen() {
                         </InlineStack>
                       </Box>
 
-                      {/* Missing Unit Cost & Optional Manual Assumption (Requirement 15) */}
+                      {/* Missing Unit Cost & Optional Manual Assumption (Requirements 15 & 23) */}
                       {selectedOfferedVariant && selectedOfferedVariant.unitCost === null && (
                         <Card background="bg-surface-secondary">
                           <BlockStack gap="300">
                             <Banner tone="warning" title="Missing Unit Cost in Shopify">
                               <p>
-                                This variant has no unit cost in Shopify. Profit can’t be estimated unless a cost is recorded.
-                                You can configure <strong>Cost per item</strong> in Shopify Admin, or optionally provide an advisory cost assumption below.
+                                This variant has no unit cost in Shopify. Profit cannot be estimated unless a cost is recorded.
+                                Follow these steps in Shopify Admin to add a cost:
+                              </p>
+                              <ol style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
+                                <li>Open <strong>Shopify Admin &gt; Products</strong> and click <strong>{selectedOfferedProduct.title}</strong>.</li>
+                                <li>Under <strong>Variants</strong>, click <strong>{selectedOfferedVariant.title}</strong>.</li>
+                                <li>Under <strong>Pricing</strong>, enter your cost in <strong>Cost per item</strong>.</li>
+                                <li>Click <strong>Save</strong> in Shopify Admin.</li>
+                              </ol>
+                              <p style={{ marginTop: "8px" }}>
+                                Alternatively, you can enter an optional <strong>manual cost assumption</strong> below to test this promotion scenario now without altering Shopify's catalog data.
                               </p>
                             </Banner>
                             <TextField
@@ -568,13 +577,22 @@ export default function NewOfferCheckScreen() {
                         </Card>
                       )}
 
-                      {/* Guidance for Untracked Inventory */}
+                      {/* Guidance for Untracked Inventory (Requirement 23) */}
                       {selectedOfferedVariant && selectedOfferedVariant.inventoryManagement !== "SHOPIFY" && (
-                        <Banner tone="info" title="Inventory not tracked">
+                        <Banner tone="info" title="Inventory Tracking Disabled in Shopify">
                           <p>
                             Inventory tracking is disabled for this variant in Shopify. PromoLint records this as untracked.
                             Untracked inventory does not mean unlimited stock; physical availability cannot be monitored or verified at your selected location.
                           </p>
+                          <p style={{ marginTop: "6px" }}>
+                            <strong>To enable inventory tracking:</strong>
+                          </p>
+                          <ol style={{ margin: "4px 0 0 0", paddingLeft: "20px" }}>
+                            <li>Open <strong>Shopify Admin &gt; Products</strong> and select <strong>{selectedOfferedProduct.title}</strong>.</li>
+                            <li>Under <strong>Variants</strong>, click <strong>{selectedOfferedVariant.title}</strong>.</li>
+                            <li>Under <strong>Inventory</strong>, check <strong>Track quantity</strong>.</li>
+                            <li>Assign on-hand stock quantities to your fulfillment locations and click <strong>Save</strong>.</li>
+                          </ol>
                         </Banner>
                       )}
                     </BlockStack>

@@ -15,27 +15,30 @@ import {
   Banner,
   Box,
   Divider,
+  List,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
-import { getRecentOfferChecks } from "../services/checks.server";
+import { getRecentOfferChecks, getOfferCheckMetrics } from "../services/checks.server";
 import { checkStoreReadiness } from "../services/shopify-catalog.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
-  const [checks, readiness] = await Promise.all([
+  const [checks, readiness, metrics] = await Promise.all([
     getRecentOfferChecks(session.shop, 5),
     checkStoreReadiness(admin),
+    getOfferCheckMetrics(session.shop),
   ]);
 
   return json({
     checks,
     shop: session.shop,
     readiness,
+    metrics,
   });
 };
 
 export default function HomeScreen() {
-  const { checks, shop, readiness } = useLoaderData<typeof loader>();
+  const { checks, readiness, metrics } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   const renderStatusBadge = (status: string) => {
@@ -51,6 +54,11 @@ export default function HomeScreen() {
     }
   };
 
+  const formattedCheckedTime = new Date(readiness.checkedAt).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
   return (
     <Page
       title="PromoLint"
@@ -61,48 +69,68 @@ export default function HomeScreen() {
       }}
       secondaryActions={[
         {
+          content: "Offer checks history",
+          onAction: () => navigate("/app/checks"),
+        },
+        {
           content: "Settings",
           onAction: () => navigate("/app/settings"),
         },
       ]}
     >
       <BlockStack gap="500">
-        <Banner tone="info" title="Pre-launch offer quality assurance">
+        {/* Core Purpose & Guardrail Disclosure */}
+        <Banner tone="info" title="Pre-launch promotion QA tool">
           <p>
-            PromoLint is an administrative QA tool to audit proposed promotion scenarios
-            against live inventory, catalog unit costs, and active store discounts before you
-            launch. PromoLint does not publish storefront widgets, modify checkout, or alter merchant theme files.
+            PromoLint is an administrative audit tool that checks proposed promotion scenarios against live inventory,
+            Shopify unit costs, and active store discounts before launch. PromoLint does not publish offers to shoppers,
+            alter checkout, create discount codes, or claim incremental sales impact.
           </p>
         </Banner>
 
-        {/* Store Readiness Status based purely on live Shopify Admin GraphQL API checks */}
+        {/* Factual Shopify API Connection & Scope Status (Requirement 22) */}
         <Card>
           <BlockStack gap="300">
             <InlineStack align="space-between" blockAlign="center">
               <InlineStack gap="200" blockAlign="center">
                 <Text as="h2" variant="headingMd">
-                  Store Audit Readiness
+                  Shopify API Connection & Scope Status
                 </Text>
                 {readiness.isReady ? (
-                  <Badge tone="success">Ready for audits</Badge>
+                  <Badge tone="success">API connection verified</Badge>
                 ) : (
-                  <Badge tone="warning">Setup required</Badge>
+                  <Badge tone="warning">Scope setup required</Badge>
                 )}
               </InlineStack>
               <Text as="span" variant="bodyXs" tone="subdued">
-                Live Shopify API check
+                Checked at {formattedCheckedTime}
               </Text>
             </InlineStack>
             <Divider />
             {readiness.isReady ? (
-              <Text as="p" variant="bodyMd">
-                Shopify Admin API permissions are confirmed active. We verified access to your product catalog ({readiness.productCount} active products detected),
-                store fulfillment locations ({readiness.locationCount} locations), and active store discount rules.
-              </Text>
+              <BlockStack gap="200">
+                <Text as="p" variant="bodyMd">
+                  Shopify Admin GraphQL API connectivity is confirmed for this store:
+                </Text>
+                <List type="bullet">
+                  <List.Item>
+                    <strong>Product catalog (<code>read_products</code>):</strong> Verified access. Sampled {readiness.productCount} active product(s). <em>Note: Catalog accessibility verifies API read permission; it does not guarantee that cost per item is populated for every variant.</em>
+                  </List.Item>
+                  <List.Item>
+                    <strong>Fulfillment locations (<code>read_locations</code>):</strong> Verified access. Detected {readiness.locationCount} active store location(s).
+                  </List.Item>
+                  <List.Item>
+                    <strong>Store discounts (<code>read_discounts</code>):</strong> Verified access to active store discount rules and combination settings.
+                  </List.Item>
+                </List>
+                <Text as="p" variant="bodyXs" tone="subdued">
+                  Scope verification confirms PromoLint can query your store's GraphQL API. It does not verify that all products have unit costs populated, that inventory is sufficient across your catalog, or that proposed offers will be profitable.
+                </Text>
+              </BlockStack>
             ) : (
               <BlockStack gap="200">
                 <Text as="p" variant="bodyMd" tone="caution">
-                  PromoLint detected store requirements needing attention before offers can be fully audited:
+                  Requirements needing attention before promotions can be fully audited:
                 </Text>
                 <ul style={{ margin: 0, paddingLeft: "16px" }}>
                   {readiness.missingRequirements.map((req: string, i: number) => (
@@ -114,16 +142,164 @@ export default function HomeScreen() {
           </BlockStack>
         </Card>
 
-        {/* First-Run Guidance for Missing Product Costs */}
-        <Banner tone="info" title="First-time setup tip: Set variant unit costs in Shopify">
-          <p>
-            PromoLint strictly uses real Shopify data and never fabricates mock profit numbers. To calculate estimated gross margin,
-            Shopify must have a <strong>Cost per item</strong> recorded for your variants (under <em>Shopify Admin &gt; Products &gt; [Product] &gt; Variants</em>).
-            Offers with missing costs will be flagged for review to prevent unnoticed financial losses.
-          </p>
-        </Banner>
+        {/* Factual Audit Metrics (Requirement 26) */}
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text as="h2" variant="headingMd">
+                Offer Audit Activity
+              </Text>
+              <Text as="span" variant="bodyXs" tone="subdued">
+                Historical records in this store
+              </Text>
+            </InlineStack>
+            <Divider />
+            <InlineStack gap="400" wrap={true}>
+              <Box minWidth="140px">
+                <BlockStack gap="050">
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Total Audits
+                  </Text>
+                  <Text as="span" variant="headingLg">
+                    {metrics.totalChecks}
+                  </Text>
+                  <Text as="span" variant="bodyXs" tone="subdued">
+                    Saved pre-flight checks
+                  </Text>
+                </BlockStack>
+              </Box>
+
+              <Box minWidth="140px">
+                <BlockStack gap="050">
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Ready (Passed)
+                  </Text>
+                  <Text as="span" variant="headingLg">
+                    {metrics.readyChecks}
+                  </Text>
+                  <Text as="span" variant="bodyXs" tone="subdued">
+                    Zero blockers or review flags
+                  </Text>
+                </BlockStack>
+              </Box>
+
+              <Box minWidth="140px">
+                <BlockStack gap="050">
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Review Needed
+                  </Text>
+                  <Text as="span" variant="headingLg">
+                    {metrics.reviewChecks}
+                  </Text>
+                  <Text as="span" variant="bodyXs" tone="subdued">
+                    Missing cost or low stock
+                  </Text>
+                </BlockStack>
+              </Box>
+
+              <Box minWidth="140px">
+                <BlockStack gap="050">
+                  <Text as="span" variant="bodySm" tone="subdued">
+                    Blocked
+                  </Text>
+                  <Text as="span" variant="headingLg">
+                    {metrics.blockedChecks}
+                  </Text>
+                  <Text as="span" variant="bodyXs" tone="subdued">
+                    Negative profit or out of stock
+                  </Text>
+                </BlockStack>
+              </Box>
+            </InlineStack>
+            <Divider />
+            <Text as="p" variant="bodyXs" tone="subdued">
+              <strong>Metrics Definition:</strong> These counts summarize historical pre-launch QA checks recorded in PromoLint. PromoLint audits pre-launch promotion scenarios; it does not measure storefront conversions, shopper redemption rates, or causal financial impact.
+            </Text>
+          </BlockStack>
+        </Card>
+
+        {/* First-Run Onboarding Guide (Requirement 27) */}
+        {metrics.totalChecks === 0 && (
+          <Card>
+            <BlockStack gap="400">
+              <Text as="h2" variant="headingMd">
+                Getting Started with PromoLint (4 Steps)
+              </Text>
+              <Text as="p" variant="bodySm" tone="subdued">
+                Follow this quick workflow to run your first pre-launch promotion audit with accurate data:
+              </Text>
+              <Divider />
+              <BlockStack gap="300">
+                <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        Step 1: Verify Store Fulfillment Location
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        {readiness.locationCount > 0
+                          ? `Found ${readiness.locationCount} active fulfillment location(s). Stock checks will query your selected facility.`
+                          : "No fulfillment locations detected. Configure an active location in Shopify Settings > Locations."}
+                      </Text>
+                    </BlockStack>
+                    <Badge tone={readiness.locationCount > 0 ? "success" : "warning"}>
+                      {readiness.locationCount > 0 ? "Ready" : "Action Needed"}
+                    </Badge>
+                  </InlineStack>
+                </Box>
+
+                <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        Step 2: Ensure Variant Unit Costs in Shopify
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        In Shopify Admin &gt; Products, enter a <strong>Cost per item</strong> under Pricing for each variant. PromoLint uses real costs to calculate gross margin and prevent unprofitable promotions.
+                      </Text>
+                    </BlockStack>
+                    <Badge tone="info">Recommended</Badge>
+                  </InlineStack>
+                </Box>
+
+                <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        Step 3: Review Advisory QA Preferences
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Configure your preferred warning thresholds for minimum inventory (e.g. 5 units) and minimum gross margin (e.g. 20%).
+                      </Text>
+                    </BlockStack>
+                    <Button variant="plain" onClick={() => navigate("/app/settings")}>
+                      Configure settings
+                    </Button>
+                  </InlineStack>
+                </Box>
+
+                <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                  <InlineStack align="space-between" blockAlign="center">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        Step 4: Run Your First Offer Check
+                      </Text>
+                      <Text as="span" variant="bodySm" tone="subdued">
+                        Pick a trigger product and offered variant, choose your proposed discount (or bundle quantity), and inspect your pre-launch report.
+                      </Text>
+                    </BlockStack>
+                    <Button variant="primary" onClick={() => navigate("/app/new")}>
+                      Start check
+                    </Button>
+                  </InlineStack>
+                </Box>
+              </BlockStack>
+            </BlockStack>
+          </Card>
+        )}
 
         <Layout>
+          {/* Main Action Banner */}
           <Layout.Section>
             <Card>
               <BlockStack gap="400">
@@ -148,6 +324,7 @@ export default function HomeScreen() {
             </Card>
           </Layout.Section>
 
+          {/* Recent Checks Section (Requirements 21 & 26) */}
           <Layout.Section>
             <Card padding="0">
               <Box padding="400">
@@ -165,11 +342,16 @@ export default function HomeScreen() {
 
               {checks.length === 0 ? (
                 <Box padding="600">
+                  {/* Polished, Useful Empty State (Requirement 21) */}
                   <EmptyState
-                    heading="No offer checks yet"
+                    heading="No offer checks recorded yet"
                     action={{
                       content: "Check an offer",
                       onAction: () => navigate("/app/new"),
+                    }}
+                    secondaryAction={{
+                      content: "Configure settings",
+                      onAction: () => navigate("/app/settings"),
                     }}
                     image="https://cdn.shopify.com/s/files/1/0262/4071/2726/files/emptystate-files.png"
                   >
@@ -178,6 +360,27 @@ export default function HomeScreen() {
                       and discount combination risks before making it active.
                     </p>
                   </EmptyState>
+
+                  <Box paddingBlockStart="400">
+                    <Card background="bg-surface-secondary">
+                      <BlockStack gap="200">
+                        <Text as="h3" variant="headingSm">
+                          How PromoLint offer audits work:
+                        </Text>
+                        <List type="number">
+                          <List.Item>
+                            <strong>Scenario Input:</strong> Select your proposed trigger and offered products, discount type (percentage, fixed amount, or fixed price), and bundle quantity.
+                          </List.Item>
+                          <List.Item>
+                            <strong>Live Data Verification:</strong> PromoLint queries Shopify for current unit costs, location-specific inventory, and active store discount rules.
+                          </List.Item>
+                          <List.Item>
+                            <strong>Advisory QA Verdict:</strong> Receive an immediate status (Ready, Review, or Blocked) with break-even calculations, stock warnings, and stacking alerts.
+                          </List.Item>
+                        </List>
+                      </BlockStack>
+                    </Card>
+                  </Box>
                 </Box>
               ) : (
                 <IndexTable
@@ -187,7 +390,7 @@ export default function HomeScreen() {
                     { title: "Status" },
                     { title: "Scenario Trigger Product" },
                     { title: "Offered Product" },
-                    { title: "Discount" },
+                    { title: "Discount & Qty" },
                     { title: "Est. Gross Profit" },
                     { title: "Checked At" },
                     { title: "Action" },

@@ -14,8 +14,14 @@ redirect_urls = [
 ]
 
 [access_scopes]
+# Official Shopify Access Scope Configuration:
+# PromoLint adheres to the principle of least privilege. Only 4 read scopes are requested:
+# - read_products:  Query product titles, variants, SKUs, catalog prices, images, and inventoryItem.unitCost for margin calculations.
+# - read_inventory: Query point-in-time available stock at fulfillment locations via inventoryLevel.quantities.
+# - read_locations: Query active fulfillment locations for location-specific stock verification.
+# - read_discounts: Query active store discount rules and combinesWith permissions for stacking conflict detection.
+# Zero write scopes, zero order scopes, zero customer data scopes. PromoLint never alters merchant store data or touches PII.
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-# Minimal scope strategy: Only read permissions needed for offer QA
 scopes = "read_products,read_inventory,read_locations,read_discounts"
 
 [webhooks]

@@ -131,13 +131,22 @@ export default function SettingsScreen() {
                     Customize your store's warning sensitivity for pre-launch offer audits. These thresholds represent your advisory QA preferences; they do not alter Shopify inventory policies or block discount creation in your store.
                   </Text>
 
+                  <Banner tone="info" title="How preferences affect checks">
+                    <p>
+                      <strong>Future Audits:</strong> Thresholds configured below apply to all new offer checks and future re-checks.
+                    </p>
+                    <p style={{ marginTop: "4px" }}>
+                      <strong>Historical Snapshots Unchanged:</strong> Previously saved audit records in your history are immutable point-in-time records. Changing thresholds here will <em>not</em> retroactively alter past findings, warnings, or verdicts.
+                    </p>
+                  </Banner>
+
                   <Select
                     label="Default Inventory Location"
                     name="defaultLocationId"
                     options={locationOptions}
                     value={defaultLocationId}
                     onChange={setDefaultLocationId}
-                    helpText="Pre-selected inventory location when starting a new offer check."
+                    helpText="Pre-selected inventory location when starting a new offer check. Can be overridden on individual checks."
                   />
 
                   <TextField
@@ -147,7 +156,7 @@ export default function SettingsScreen() {
                     value={minStockThreshold}
                     onChange={setMinStockThreshold}
                     autoComplete="off"
-                    helpText="Advisory preference: Triggers a review warning if available inventory at check time is below this number."
+                    helpText="Advisory preference for future checks: Triggers a review warning if available inventory at check time is below this count."
                     error={actionData?.errors?.minStockThreshold}
                   />
 
@@ -159,7 +168,7 @@ export default function SettingsScreen() {
                     onChange={setMinMarginThreshold}
                     autoComplete="off"
                     suffix="%"
-                    helpText="Advisory preference: Triggers a review warning if estimated gross margin is below this percentage."
+                    helpText="Advisory preference for future checks: Triggers a review warning if estimated gross margin is below this percentage."
                     error={actionData?.errors?.minMarginThreshold}
                   />
 
@@ -176,28 +185,59 @@ export default function SettingsScreen() {
             </Layout.Section>
 
             <Layout.Section variant="oneThird">
-              <Card>
-                <BlockStack gap="300">
-                  <Text as="h3" variant="headingSm">
-                    Included in Calculations
-                  </Text>
-                  <List type="bullet">
-                    <List.Item>Offered variant catalog price</List.Item>
-                    <List.Item>Shopify inventory item unit cost</List.Item>
-                    <List.Item>Point-in-time available stock count</List.Item>
-                    <List.Item>Store discount combination settings</List.Item>
-                  </List>
+              <BlockStack gap="400">
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      Included in Calculations
+                    </Text>
+                    <List type="bullet">
+                      <List.Item>Offered variant catalog price</List.Item>
+                      <List.Item>Shopify inventory item unit cost</List.Item>
+                      <List.Item>Point-in-time available stock count</List.Item>
+                      <List.Item>Store discount combination settings</List.Item>
+                    </List>
 
-                  <Divider />
+                    <Divider />
 
-                  <Text as="h3" variant="headingSm">
-                    Advisory Setting Disclaimer
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    Thresholds configured here are merchant-configurable advisory preferences used exclusively for internal PromoLint offer quality checks. They are not Shopify platform limits, checkout validation rules, or revenue guarantees.
-                  </Text>
-                </BlockStack>
-              </Card>
+                    <Text as="h3" variant="headingSm">
+                      Advisory Setting Disclaimer
+                    </Text>
+                    <Text as="p" variant="bodySm" tone="subdued">
+                      Thresholds configured here are merchant-configurable advisory preferences used exclusively for internal PromoLint offer quality checks. They are not Shopify platform limits, checkout validation rules, or revenue guarantees.
+                    </Text>
+                  </BlockStack>
+                </Card>
+
+                {/* API Scope Transparency Card (Requirement 29) */}
+                <Card>
+                  <BlockStack gap="300">
+                    <Text as="h3" variant="headingSm">
+                      API Scopes & Data Usage
+                    </Text>
+                    <Text as="p" variant="bodyXs" tone="subdued">
+                      PromoLint adheres to the principle of least privilege. Only 4 read scopes are requested:
+                    </Text>
+                    <List type="bullet">
+                      <List.Item>
+                        <code>read_products</code>: Reads catalog prices, variant titles, SKUs, and unit costs.
+                      </List.Item>
+                      <List.Item>
+                        <code>read_inventory</code>: Reads point-in-time available quantities at chosen locations.
+                      </List.Item>
+                      <List.Item>
+                        <code>read_locations</code>: Reads fulfillment location names and IDs.
+                      </List.Item>
+                      <List.Item>
+                        <code>read_discounts</code>: Reads active store discount rules and combination permissions.
+                      </List.Item>
+                    </List>
+                    <Text as="p" variant="bodyXs" tone="subdued">
+                      No write scopes, no storefront theme edits, and no customer or order data access.
+                    </Text>
+                  </BlockStack>
+                </Card>
+              </BlockStack>
             </Layout.Section>
           </Layout>
         </Form>

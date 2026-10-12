@@ -150,6 +150,146 @@ export async function getOfferCheckById(shop: string, id: string) {
   });
 }
 
+export interface OfferCheckMetrics {
+  totalChecks: number;
+  readyChecks: number;
+  reviewChecks: number;
+  blockedChecks: number;
+  latestCheckDate: string | null;
+}
+
+export async function getOfferCheckMetrics(shop: string): Promise<OfferCheckMetrics> {
+  const [totalChecks, readyChecks, reviewChecks, blockedChecks, latestCheck] = await Promise.all([
+    prisma.offerCheck.count({ where: { shop } }),
+    prisma.offerCheck.count({ where: { shop, status: "READY" } }),
+    prisma.offerCheck.count({ where: { shop, status: "REVIEW" } }),
+    prisma.offerCheck.count({ where: { shop, status: "BLOCKED" } }),
+    prisma.offerCheck.findFirst({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+
+  return {
+    totalChecks,
+    readyChecks,
+    reviewChecks,
+    blockedChecks,
+    latestCheckDate: latestCheck?.createdAt ? latestCheck.createdAt.toISOString() : null,
+  };
+}
+
+function escapeCsvCell(val: any): string {
+  if (val === null || val === undefined) return "";
+  const str = String(val);
+  if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+}
+
+export function formatOfferChecksToCsv(checks: any[]): string {
+  const headers = [
+    "Check ID",
+    "Checked At",
+    "Status",
+    "Scenario Trigger Product",
+    "Scenario Trigger Product ID",
+    "Scenario Trigger Variant",
+    "Scenario Trigger Variant ID",
+    "Scenario Trigger SKU",
+    "Offered Product",
+    "Offered Product ID",
+    "Offered Variant",
+    "Offered Variant ID",
+    "Offered Variant SKU",
+    "Offer Quantity",
+    "Discount Type",
+    "Discount Value",
+    "Catalog Price",
+    "Currency",
+    "Effective Unit Cost",
+    "Cost Source",
+    "Est Selling Price Per Unit",
+    "Est Gross Profit Per Unit",
+    "Est Gross Margin Pct",
+    "Total Bundle Revenue",
+    "Total Bundle Cost",
+    "Total Bundle Gross Profit",
+    "Target Margin Benchmark Price",
+    "Max Allowable Discount",
+    "Fulfillment Location",
+    "Location ID",
+    "Inventory Tracked",
+    "Inventory Available Qty",
+    "Inventory State",
+    "Findings Count",
+    "Findings Summary",
+    "Recheck Of ID",
+    "Duplicated From ID",
+    "Standard Exclusions",
+  ];
+
+  const rows = checks.map((c) => {
+    let findingsCount = 0;
+    let findingsSummary = "";
+    try {
+      const parsedWarnings = JSON.parse(c.warnings || "[]");
+      findingsCount = parsedWarnings.length;
+      findingsSummary = parsedWarnings.map((w: any) => `[${w.findingLevel || w.severity}] ${w.code}: ${w.message}`).join(" | ");
+    } catch {
+      findingsSummary = "";
+    }
+
+    const standardExclusions =
+      "Advisory pre-launch estimate. Excludes customer shipping costs, sales taxes/duties, payment processing fees (e.g. 2.9% + 30¢), fulfillment labor, packaging, overhead, and customer returns.";
+
+    return [
+      escapeCsvCell(c.id),
+      escapeCsvCell(new Date(c.createdAt).toISOString()),
+      escapeCsvCell(c.status),
+      escapeCsvCell(c.triggerProductTitle),
+      escapeCsvCell(c.triggerProductId),
+      escapeCsvCell(c.triggerVariantTitle),
+      escapeCsvCell(c.triggerVariantId),
+      escapeCsvCell(c.triggerVariantSku || ""),
+      escapeCsvCell(c.offeredProductTitle),
+      escapeCsvCell(c.offeredProductId),
+      escapeCsvCell(c.offeredVariantTitle),
+      escapeCsvCell(c.offeredVariantId),
+      escapeCsvCell(c.offeredVariantSku || ""),
+      escapeCsvCell(c.offerQuantity || 1),
+      escapeCsvCell(c.discountType),
+      escapeCsvCell(c.discountValue),
+      escapeCsvCell(c.currentPrice),
+      escapeCsvCell(c.currencyCode || "USD"),
+      escapeCsvCell(c.unitCost !== null ? c.unitCost : "Missing"),
+      escapeCsvCell(c.costSource),
+      escapeCsvCell(c.discountedPrice),
+      escapeCsvCell(c.estimatedGrossProfit !== null ? c.estimatedGrossProfit : "N/A"),
+      escapeCsvCell(c.estimatedGrossMargin !== null ? `${c.estimatedGrossMargin}%` : "N/A"),
+      escapeCsvCell(c.totalRevenue !== null ? c.totalRevenue : "N/A"),
+      escapeCsvCell(c.totalCost !== null ? c.totalCost : "N/A"),
+      escapeCsvCell(c.totalGrossProfit !== null ? c.totalGrossProfit : "N/A"),
+      escapeCsvCell(c.breakEvenPrice !== null ? c.breakEvenPrice : "N/A"),
+      escapeCsvCell(c.maxDiscountAmount !== null ? c.maxDiscountAmount : "N/A"),
+      escapeCsvCell(c.locationName),
+      escapeCsvCell(c.locationId),
+      escapeCsvCell(c.inventoryTracked ? "Yes" : "No"),
+      escapeCsvCell(c.inventoryQuantity !== null ? c.inventoryQuantity : "N/A"),
+      escapeCsvCell(c.inventoryState),
+      escapeCsvCell(findingsCount),
+      escapeCsvCell(findingsSummary),
+      escapeCsvCell(c.recheckOfId || ""),
+      escapeCsvCell(c.duplicatedFromId || ""),
+      escapeCsvCell(standardExclusions),
+    ].join(",");
+  });
+
+  return [headers.join(","), ...rows].join("\r\n");
+}
+
 export async function deleteOfferCheck(shop: string, id: string) {
   return await prisma.offerCheck.deleteMany({
     where: {

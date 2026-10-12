@@ -116,6 +116,17 @@ export default function OfferChecksListScreen() {
         content: "Check an offer",
         onAction: () => navigate("/app/new"),
       }}
+      secondaryActions={[
+        {
+          content: "Export CSV",
+          accessibilityLabel: "Export filtered audit checks as CSV spreadsheet",
+          onAction: () => {
+            const params = new URLSearchParams(window.location.search);
+            window.open(`/app/checks/export?${params.toString()}`, "_blank");
+          },
+          disabled: checks.length === 0,
+        },
+      ]}
       backAction={{ content: "Home", onAction: () => navigate("/app") }}
     >
       <BlockStack gap="400">
