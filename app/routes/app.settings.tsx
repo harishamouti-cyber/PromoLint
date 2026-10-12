@@ -191,15 +191,11 @@ export default function SettingsScreen() {
                   <Divider />
 
                   <Text as="h3" variant="headingSm">
-                    Excluded from Calculations
+                    Advisory Setting Disclaimer
                   </Text>
-                  <List type="bullet">
-                    <List.Item>Customer shipping fees and delivery costs</List.Item>
-                    <List.Item>Sales taxes and duties</List.Item>
-                    <List.Item>Payment gateway transaction fees</List.Item>
-                    <List.Item>Packaging, handling, and warehouse overhead</List.Item>
-                    <List.Item>Customer return and refund allowances</List.Item>
-                  </List>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Thresholds configured here are merchant-configurable advisory preferences used exclusively for internal PromoLint offer quality checks. They are not Shopify platform limits, checkout validation rules, or revenue guarantees.
+                  </Text>
                 </BlockStack>
               </Card>
             </Layout.Section>

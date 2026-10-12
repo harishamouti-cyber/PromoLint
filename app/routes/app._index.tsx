@@ -216,9 +216,21 @@ export default function HomeScreen() {
                         </Text>
                       </IndexTable.Cell>
                       <IndexTable.Cell>
-                        {check.discountType === "PERCENTAGE"
-                          ? `${check.discountValue}% off`
-                          : `${check.currencyCode} ${check.discountValue.toFixed(2)} off`}
+                        <Text as="span" variant="bodyMd">
+                          {check.discountType === "PERCENTAGE"
+                            ? `${check.discountValue}% off`
+                            : check.discountType === "FIXED_AMOUNT"
+                            ? `${check.currencyCode} ${check.discountValue.toFixed(2)} off`
+                            : `Fixed: ${check.currencyCode} ${check.discountValue.toFixed(2)}`}
+                        </Text>
+                        {check.offerQuantity && check.offerQuantity > 1 && (
+                          <>
+                            <br />
+                            <Text as="span" variant="bodyXs" tone="subdued">
+                              Qty: {check.offerQuantity} units
+                            </Text>
+                          </>
+                        )}
                       </IndexTable.Cell>
                       <IndexTable.Cell>
                         {check.estimatedGrossProfit !== null ? (
@@ -248,12 +260,20 @@ export default function HomeScreen() {
                         })}
                       </IndexTable.Cell>
                       <IndexTable.Cell>
-                        <Button
-                          size="slim"
-                          onClick={() => navigate(`/app/checks/${check.id}`)}
-                        >
-                          View
-                        </Button>
+                        <InlineStack gap="200" blockAlign="center">
+                          <Button
+                            size="slim"
+                            onClick={() => navigate(`/app/checks/${check.id}`)}
+                          >
+                            View
+                          </Button>
+                          <Button
+                            size="slim"
+                            onClick={() => navigate(`/app/new?duplicateId=${check.id}`)}
+                          >
+                            Duplicate
+                          </Button>
+                        </InlineStack>
                       </IndexTable.Cell>
                     </IndexTable.Row>
                   ))}

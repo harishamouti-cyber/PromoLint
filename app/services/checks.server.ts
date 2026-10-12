@@ -18,11 +18,14 @@ export interface CreateOfferCheckInput {
   triggerProductTitle: string;
   triggerVariantId: string;
   triggerVariantTitle: string;
+  triggerVariantSku?: string | null;
   offeredProductId: string;
   offeredProductTitle: string;
   offeredVariantId: string;
   offeredVariantTitle: string;
+  offeredVariantSku?: string | null;
   offeredProductImageUrl?: string | null;
+  offerQuantity?: number;
   discountType: DiscountType;
   discountValue: number;
   currencyCode?: string;
@@ -31,6 +34,7 @@ export interface CreateOfferCheckInput {
   locationName: string;
   evaluation: OfferEvaluationResult;
   recheckOfId?: string | null;
+  duplicatedFromId?: string | null;
 }
 
 export async function createOfferCheck(input: CreateOfferCheckInput) {
@@ -42,11 +46,14 @@ export async function createOfferCheck(input: CreateOfferCheckInput) {
       triggerProductTitle: input.triggerProductTitle,
       triggerVariantId: input.triggerVariantId,
       triggerVariantTitle: input.triggerVariantTitle,
+      triggerVariantSku: input.triggerVariantSku || null,
       offeredProductId: input.offeredProductId,
       offeredProductTitle: input.offeredProductTitle,
       offeredVariantId: input.offeredVariantId,
       offeredVariantTitle: input.offeredVariantTitle,
+      offeredVariantSku: input.offeredVariantSku || null,
       offeredProductImageUrl: input.offeredProductImageUrl || null,
+      offerQuantity: input.offerQuantity || input.evaluation.offerQuantity || 1,
       discountType: input.discountType,
       discountValue: input.discountValue,
       currencyCode: input.currencyCode || "USD",
@@ -56,6 +63,11 @@ export async function createOfferCheck(input: CreateOfferCheckInput) {
       discountedPrice: input.evaluation.discountedPrice,
       estimatedGrossProfit: input.evaluation.estimatedGrossProfit,
       estimatedGrossMargin: input.evaluation.estimatedGrossMargin,
+      totalRevenue: input.evaluation.totalRevenue,
+      totalCost: input.evaluation.totalCost,
+      totalGrossProfit: input.evaluation.totalGrossProfit,
+      breakEvenPrice: input.evaluation.breakEven.targetMarginPrice,
+      maxDiscountAmount: input.evaluation.breakEven.maxDiscountAmount,
       locationId: input.locationId,
       locationName: input.locationName,
       inventoryQuantity: input.evaluation.inventoryQuantity,
@@ -65,13 +77,65 @@ export async function createOfferCheck(input: CreateOfferCheckInput) {
       assumptions: input.evaluation.assumptions,
       discountAssumptions: input.evaluation.discountAssumptions,
       recheckOfId: input.recheckOfId || null,
+      duplicatedFromId: input.duplicatedFromId || null,
     },
   });
 }
 
-export async function getRecentOfferChecks(shop: string, limit = 20) {
+export interface FilterOfferChecksOptions {
+  searchQuery?: string;
+  status?: string;
+  discountType?: string;
+  dateRange?: string;
+  limit?: number;
+}
+
+export async function getRecentOfferChecks(
+  shop: string,
+  options: number | FilterOfferChecksOptions = 20
+) {
+  let limit = 20;
+  const where: any = { shop };
+
+  if (typeof options === "number") {
+    limit = options;
+  } else {
+    limit = options.limit || 50;
+
+    if (options.searchQuery && options.searchQuery.trim().length > 0) {
+      const q = options.searchQuery.trim();
+      where.OR = [
+        { triggerProductTitle: { contains: q } },
+        { offeredProductTitle: { contains: q } },
+        { triggerVariantTitle: { contains: q } },
+        { offeredVariantTitle: { contains: q } },
+        { triggerVariantSku: { contains: q } },
+        { offeredVariantSku: { contains: q } },
+      ];
+    }
+
+    if (options.status && options.status !== "ALL") {
+      where.status = options.status;
+    }
+
+    if (options.discountType && options.discountType !== "ALL") {
+      where.discountType = options.discountType;
+    }
+
+    if (options.dateRange) {
+      const now = Date.now();
+      if (options.dateRange === "24h") {
+        where.createdAt = { gte: new Date(now - 24 * 60 * 60 * 1000) };
+      } else if (options.dateRange === "7d") {
+        where.createdAt = { gte: new Date(now - 7 * 24 * 60 * 60 * 1000) };
+      } else if (options.dateRange === "30d") {
+        where.createdAt = { gte: new Date(now - 30 * 24 * 60 * 60 * 1000) };
+      }
+    }
+  }
+
   return await prisma.offerCheck.findMany({
-    where: { shop },
+    where,
     orderBy: { createdAt: "desc" },
     take: limit,
   });
@@ -150,9 +214,19 @@ export async function recheckExistingOfferCheck(
   // Check live active store discounts
   const discountData = await fetchActiveDiscounts(admin, 25);
 
+  const offerQuantity = original.offerQuantity || 1;
+
+  // If original had a manual cost assumption and Shopify still lacks a unit cost, carry it forward
+  const customCostAssumption =
+    offeredVariant.unitCost === null && original.costSource?.includes("Merchant manual cost assumption")
+      ? original.unitCost
+      : null;
+
   const evaluation = evaluateOfferCheck({
     currentPrice: offeredVariant.price,
     unitCost: offeredVariant.unitCost,
+    customCostAssumption,
+    offerQuantity,
     discountType: original.discountType as DiscountType,
     discountValue: original.discountValue,
     currencyCode: offeredVariant.currencyCode,
@@ -172,11 +246,14 @@ export async function recheckExistingOfferCheck(
     triggerProductTitle: triggerProduct.title,
     triggerVariantId: triggerVariant.id,
     triggerVariantTitle: triggerVariant.title,
+    triggerVariantSku: triggerVariant.sku,
     offeredProductId: offeredProduct.id,
     offeredProductTitle: offeredProduct.title,
     offeredVariantId: offeredVariant.id,
     offeredVariantTitle: offeredVariant.title,
+    offeredVariantSku: offeredVariant.sku,
     offeredProductImageUrl: offeredVariant.imageUrl || offeredProduct.imageUrl,
+    offerQuantity,
     discountType: original.discountType as DiscountType,
     discountValue: original.discountValue,
     currencyCode: offeredVariant.currencyCode,

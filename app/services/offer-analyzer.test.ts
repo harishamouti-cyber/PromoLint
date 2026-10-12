@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calculateDiscountedPrice,
+  calculateBreakEven,
   calculateProfit,
   analyzeInventory,
   analyzeDiscounts,
@@ -46,6 +47,50 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
     it("caps fixed discount at 0 when discount exceeds current price", () => {
       expect(calculateDiscountedPrice(25, "FIXED_AMOUNT", 30)).toBe(0);
       expect(calculateDiscountedPrice(25, "FIXED_AMOUNT", 25)).toBe(0);
+    });
+
+    it("sets fixed offer price directly for FIXED_PRICE scenarios", () => {
+      // $50 current price with proposed fixed offer price of $35.00
+      expect(calculateDiscountedPrice(50, "FIXED_PRICE", 35)).toBe(35.0);
+      expect(calculateDiscountedPrice(50, "FIXED_PRICE", 19.99)).toBe(19.99);
+      // Handles 0 or negative
+      expect(calculateDiscountedPrice(50, "FIXED_PRICE", 0)).toBe(0);
+    });
+  });
+
+  describe("Break-Even & Target Margin Benchmarks", () => {
+    it("calculates break-even price and maximum allowable discount accurately", () => {
+      // Catalog price $100, unit cost $40, target margin 20%
+      // Pure break-even = $40.00
+      // Target margin price = $40 / (1 - 0.20) = $50.00
+      // Max discount amount = $100 - $50 = $50.00 (50%)
+      const be = calculateBreakEven(100, 40, 20);
+      expect(be.costAvailable).toBe(true);
+      expect(be.breakEvenPrice).toBe(40.0);
+      expect(be.targetMarginPrice).toBe(50.0);
+      expect(be.maxDiscountAmount).toBe(50.0);
+      expect(be.maxDiscountPercentage).toBe(50.0);
+      expect(be.targetMarginPercentage).toBe(20.0);
+      expect(be.explanation).toContain("cannot sell below 50");
+    });
+
+    it("returns null benchmarks when unit cost is missing", () => {
+      const beNull = calculateBreakEven(100, null, 25);
+      expect(beNull.costAvailable).toBe(false);
+      expect(beNull.breakEvenPrice).toBeNull();
+      expect(beNull.targetMarginPrice).toBeNull();
+      expect(beNull.maxDiscountAmount).toBeNull();
+      expect(beNull.maxDiscountPercentage).toBeNull();
+      expect(beNull.explanation).toContain("cannot be calculated without a unit cost");
+    });
+
+    it("caps max discount at $0 when target margin price exceeds catalog price", () => {
+      // Catalog price $50, unit cost $45, target margin 20%
+      // Target price = 45 / 0.8 = 56.25 > 50
+      const be = calculateBreakEven(50, 45, 20);
+      expect(be.targetMarginPrice).toBe(56.25);
+      expect(be.maxDiscountAmount).toBe(0);
+      expect(be.maxDiscountPercentage).toBe(0);
     });
   });
 
@@ -135,6 +180,71 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
         expect.arrayContaining([
           expect.objectContaining({
             code: "DISCOUNT_EXCEEDS_PRICE",
+            severity: "BLOCKER",
+            findingLevel: "Warning",
+          }),
+        ])
+      );
+    });
+
+    it("scales total revenue, total cost, and total gross profit for bundle quantities", () => {
+      // Current $100, 20% off -> $80. Cost is $40. Single profit is $40.
+      // Quantity = 4 units -> Total Rev: $320, Total Cost: $160, Total Profit: $160
+      const res = calculateProfit(100, "PERCENTAGE", 20, 40, 20, 4);
+      expect(res.quantity).toBe(4);
+      expect(res.discountedPrice).toBe(80);
+      expect(res.grossProfit).toBe(40);
+      expect(res.totalRevenue).toBe(320);
+      expect(res.totalCost).toBe(160);
+      expect(res.totalGrossProfit).toBe(160);
+    });
+
+    it("uses merchant manual cost assumption when Shopify unit cost is missing", () => {
+      const res = calculateProfit(100, "PERCENTAGE", 20, null, 20, 1, 30);
+      expect(res.costMissing).toBe(false);
+      expect(res.unitCost).toBe(30);
+      expect(res.grossProfit).toBe(50); // 80 - 30
+      expect(res.grossMargin).toBe(62.5); // 50 / 80 * 100
+      expect(res.costSource).toContain("Merchant manual cost assumption (30)");
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "MANUAL_COST_ASSUMPTION_USED",
+            severity: "INFO",
+            findingLevel: "Good to know",
+          }),
+        ])
+      );
+    });
+
+    it("prioritizes Shopify unit cost over merchant assumption when both are provided", () => {
+      const res = calculateProfit(100, "PERCENTAGE", 20, 45, 20, 1, 30);
+      expect(res.unitCost).toBe(45);
+      expect(res.costSource).toBe("Shopify Variant inventoryItem.unitCost");
+      expect(res.grossProfit).toBe(35); // 80 - 45
+    });
+
+    it("flags FIXED_PRICE scenarios when offer price exceeds catalog price", () => {
+      const res = calculateProfit(50, "FIXED_PRICE", 60, 20);
+      expect(res.discountedPrice).toBe(60);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "OFFER_PRICE_EXCEEDS_CATALOG",
+            severity: "INFO",
+            findingLevel: "Good to know",
+          }),
+        ])
+      );
+    });
+
+    it("blocks FIXED_PRICE scenarios when offer price is zero or negative", () => {
+      const res = calculateProfit(50, "FIXED_PRICE", 0, 20);
+      expect(res.discountedPrice).toBe(0);
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "FREE_OR_NEGATIVE_PRICE",
             severity: "BLOCKER",
             findingLevel: "Warning",
           }),
@@ -231,6 +341,22 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
             code: "INVENTORY_UNAVAILABLE",
             severity: "WARNING",
             findingLevel: "Unable to verify",
+          }),
+        ])
+      );
+    });
+
+    it("blocks offer when available stock is insufficient for bundle offer quantity", () => {
+      // 3 units available at location, but bundle scenario requires 5 units
+      const res = analyzeInventory(3, true, "Main Store", 2, true, 5);
+      expect(res.quantity).toBe(3);
+      expect(res.inventoryState).toBe("LOW_STOCK");
+      expect(res.warnings).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: "INSUFFICIENT_STOCK_FOR_QUANTITY",
+            severity: "BLOCKER",
+            findingLevel: "Warning",
           }),
         ])
       );
@@ -440,6 +566,62 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       expect(result.status).toBe("BLOCKED");
       expect(result.inventoryState).toBe("OUT_OF_STOCK");
       expect(result.warnings.some((w) => w.code === "OUT_OF_STOCK")).toBe(true);
+    });
+
+    it("evaluates multi-item bundle scenarios and populates bundle totals and break-even", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 50,
+        unitCost: 20,
+        discountType: "FIXED_PRICE",
+        discountValue: 40,
+        offerQuantity: 3,
+        inventoryQuantity: 15,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("READY");
+      expect(result.offerQuantity).toBe(3);
+      expect(result.discountedPrice).toBe(40);
+      expect(result.estimatedGrossProfit).toBe(20);
+      expect(result.totalRevenue).toBe(120); // 40 * 3
+      expect(result.totalCost).toBe(60); // 20 * 3
+      expect(result.totalGrossProfit).toBe(60); // 20 * 3
+      expect(result.breakEven.costAvailable).toBe(true);
+      expect(result.breakEven.breakEvenPrice).toBe(20);
+      expect(result.breakEven.targetMarginPrice).toBe(25); // 20 / (1 - 0.20)
+      expect(result.breakEven.maxDiscountAmount).toBe(25); // 50 - 25
+    });
+
+    it("allows READY status when merchant enters a valid cost assumption for uncosted variant", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: null,
+        customCostAssumption: 40,
+        discountType: "PERCENTAGE",
+        discountValue: 10,
+        offerQuantity: 1,
+        inventoryQuantity: 20,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("READY");
+      expect(result.unitCost).toBe(40);
+      expect(result.estimatedGrossProfit).toBe(50);
+      expect(result.costSource).toContain("Merchant manual cost assumption");
     });
   });
 });

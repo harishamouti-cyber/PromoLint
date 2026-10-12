@@ -16,7 +16,7 @@ import {
   Thumbnail,
   Divider,
   Box,
-  InlineError,
+  Badge,
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import {
@@ -24,25 +24,33 @@ import {
   fetchStoreLocations,
   fetchInventoryAvailable,
   fetchActiveDiscounts,
-  type CatalogProduct,
 } from "../services/shopify-catalog.server";
 import { getShopSettings } from "../services/settings.server";
-import { createOfferCheck } from "../services/checks.server";
-import { evaluateOfferCheck, type DiscountType } from "../services/offer-analyzer";
+import { createOfferCheck, getOfferCheckById } from "../services/checks.server";
+import {
+  evaluateOfferCheck,
+  calculateDiscountedPrice,
+  calculateBreakEven,
+  type DiscountType,
+} from "../services/offer-analyzer";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const duplicateId = url.searchParams.get("duplicateId");
 
-  const [products, locations, settings] = await Promise.all([
+  const [products, locations, settings, duplicateCheck] = await Promise.all([
     fetchProductsForOfferCheck(admin, undefined, 50),
     fetchStoreLocations(admin, 20),
     getShopSettings(session.shop),
+    duplicateId ? getOfferCheckById(session.shop, duplicateId) : Promise.resolve(null),
   ]);
 
   return json({
     products,
     locations,
     settings,
+    duplicateCheck,
   });
 };
 
@@ -56,7 +64,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const offeredVariantId = formData.get("offeredVariantId") as string;
   const discountType = (formData.get("discountType") as DiscountType) || "PERCENTAGE";
   const rawDiscountValue = formData.get("discountValue") as string;
+  const rawOfferQuantity = formData.get("offerQuantity") as string;
+  const rawCustomCost = formData.get("customCostAssumption") as string;
   const locationId = formData.get("locationId") as string;
+  const duplicatedFromId = formData.get("duplicatedFromId") as string;
 
   const errors: Record<string, string> = {};
 
@@ -66,11 +77,26 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!offeredVariantId) errors.offeredVariantId = "Please select an offered variant.";
   if (!locationId) errors.locationId = "Please select an inventory location.";
 
+  const offerQuantity = parseInt(rawOfferQuantity, 10);
+  if (isNaN(offerQuantity) || offerQuantity < 1) {
+    errors.offerQuantity = "Offer quantity must be at least 1 unit.";
+  }
+
   const discountValue = parseFloat(rawDiscountValue);
   if (isNaN(discountValue) || discountValue <= 0) {
-    errors.discountValue = "Enter a valid positive discount amount.";
+    errors.discountValue = "Enter a valid positive discount amount or offer price.";
   } else if (discountType === "PERCENTAGE" && discountValue > 100) {
     errors.discountValue = "Percentage discount cannot exceed 100%.";
+  }
+
+  let customCostAssumption: number | null = null;
+  if (rawCustomCost && rawCustomCost.trim().length > 0) {
+    const parsedCost = parseFloat(rawCustomCost);
+    if (isNaN(parsedCost) || parsedCost < 0) {
+      errors.customCostAssumption = "Cost assumption must be a positive number.";
+    } else {
+      customCostAssumption = parsedCost;
+    }
   }
 
   if (Object.keys(errors).length > 0) {
@@ -123,6 +149,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const evaluation = evaluateOfferCheck({
     currentPrice: offeredVariant.price,
     unitCost: offeredVariant.unitCost,
+    customCostAssumption,
+    offerQuantity,
     discountType,
     discountValue,
     currencyCode: offeredVariant.currencyCode,
@@ -142,11 +170,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     triggerProductTitle: triggerProduct.title,
     triggerVariantId: triggerVariant.id,
     triggerVariantTitle: triggerVariant.title,
+    triggerVariantSku: triggerVariant.sku,
     offeredProductId: offeredProduct.id,
     offeredProductTitle: offeredProduct.title,
     offeredVariantId: offeredVariant.id,
     offeredVariantTitle: offeredVariant.title,
+    offeredVariantSku: offeredVariant.sku,
     offeredProductImageUrl: offeredVariant.imageUrl || offeredProduct.imageUrl,
+    offerQuantity,
     discountType,
     discountValue,
     currencyCode: offeredVariant.currencyCode,
@@ -154,37 +185,53 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     locationId,
     locationName,
     evaluation,
+    duplicatedFromId: duplicatedFromId || null,
   });
 
   return redirect(`/app/checks/${savedCheck.id}`);
 };
 
 export default function NewOfferCheckScreen() {
-  const { products, locations, settings } = useLoaderData<typeof loader>();
+  const { products, locations, settings, duplicateCheck } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
 
-  // Form State
-  const [triggerProductId, setTriggerProductId] = useState<string>(products[0]?.id || "");
-  const [triggerVariantId, setTriggerVariantId] = useState<string>(
-    products[0]?.variants[0]?.id || ""
-  );
+  // Filter / Search state for products
+  const [productSearch, setProductSearch] = useState<string>("");
 
-  const [offeredProductId, setOfferedProductId] = useState<string>(
-    products[1]?.id || products[0]?.id || ""
-  );
-  const [offeredVariantId, setOfferedVariantId] = useState<string>(
-    (products[1] || products[0])?.variants[0]?.id || ""
-  );
+  // Form State (pre-populated if duplicating an earlier check)
+  const initialTriggerProduct = duplicateCheck?.triggerProductId || products[0]?.id || "";
+  const initialTriggerVariant = duplicateCheck?.triggerVariantId || products[0]?.variants[0]?.id || "";
+  const initialOfferedProduct = duplicateCheck?.offeredProductId || products[1]?.id || products[0]?.id || "";
+  const initialOfferedVariant = duplicateCheck?.offeredVariantId || (products[1] || products[0])?.variants[0]?.id || "";
 
-  const [discountType, setDiscountType] = useState<DiscountType>("PERCENTAGE");
-  const [discountValue, setDiscountValue] = useState<string>("20");
+  const [triggerProductId, setTriggerProductId] = useState<string>(initialTriggerProduct);
+  const [triggerVariantId, setTriggerVariantId] = useState<string>(initialTriggerVariant);
+
+  const [offeredProductId, setOfferedProductId] = useState<string>(initialOfferedProduct);
+  const [offeredVariantId, setOfferedVariantId] = useState<string>(initialOfferedVariant);
+
+  const [offerQuantity, setOfferQuantity] = useState<string>(
+    duplicateCheck?.offerQuantity ? duplicateCheck.offerQuantity.toString() : "1"
+  );
+  const [discountType, setDiscountType] = useState<DiscountType>(
+    (duplicateCheck?.discountType as DiscountType) || "PERCENTAGE"
+  );
+  const [discountValue, setDiscountValue] = useState<string>(
+    duplicateCheck?.discountValue ? duplicateCheck.discountValue.toString() : "20"
+  );
+  const [customCostAssumption, setCustomCostAssumption] = useState<string>(
+    duplicateCheck?.costSource?.includes("Merchant manual cost assumption") && duplicateCheck.unitCost !== null
+      ? duplicateCheck.unitCost.toString()
+      : ""
+  );
   const [locationId, setLocationId] = useState<string>(
-    settings.defaultLocationId && locations.some((l) => l.id === settings.defaultLocationId)
-      ? settings.defaultLocationId
-      : locations[0]?.id || ""
+    duplicateCheck?.locationId ||
+      (settings.defaultLocationId && locations.some((l) => l.id === settings.defaultLocationId)
+        ? settings.defaultLocationId
+        : locations[0]?.id || "")
   );
 
   // Derived selected entities
@@ -205,6 +252,43 @@ export default function NewOfferCheckScreen() {
     () => selectedOfferedProduct?.variants.find((v) => v.id === offeredVariantId),
     [selectedOfferedProduct, offeredVariantId]
   );
+
+  // Live Reactive Calculation Preview (Requirement 12 & 13)
+  const previewData = useMemo(() => {
+    if (!selectedOfferedVariant) return null;
+    const currentPrice = selectedOfferedVariant.price;
+    const parsedVal = parseFloat(discountValue) || 0;
+    const parsedQty = Math.max(1, parseInt(offerQuantity, 10) || 1);
+    const parsedCustomCost = customCostAssumption ? parseFloat(customCostAssumption) : null;
+
+    const effectiveCost =
+      selectedOfferedVariant.unitCost !== null
+        ? selectedOfferedVariant.unitCost
+        : parsedCustomCost !== null && !isNaN(parsedCustomCost)
+        ? parsedCustomCost
+        : null;
+
+    const unitSellingPrice = calculateDiscountedPrice(currentPrice, discountType, parsedVal);
+    const totalRevenue = unitSellingPrice * parsedQty;
+    const breakEven = calculateBreakEven(currentPrice, effectiveCost, settings.minMarginThreshold);
+
+    const unitGrossProfit = effectiveCost !== null ? unitSellingPrice - effectiveCost : null;
+    const grossMargin =
+      unitGrossProfit !== null && unitSellingPrice > 0
+        ? (unitGrossProfit / unitSellingPrice) * 100
+        : null;
+
+    return {
+      currentPrice,
+      unitSellingPrice,
+      totalRevenue,
+      effectiveCost,
+      unitGrossProfit,
+      grossMargin,
+      breakEven,
+      quantity: parsedQty,
+    };
+  }, [selectedOfferedVariant, discountType, discountValue, offerQuantity, customCostAssumption, settings.minMarginThreshold]);
 
   // Update variants when product selection changes
   const handleTriggerProductChange = (prodId: string) => {
@@ -248,18 +332,27 @@ export default function NewOfferCheckScreen() {
     );
   }
 
-  const productOptions = products.map((p) => ({
+  // Filtered product options for fast selection (Requirement 16)
+  const filteredProducts = products.filter((p) => {
+    if (!productSearch.trim()) return true;
+    const q = productSearch.toLowerCase().trim();
+    const titleMatch = p.title.toLowerCase().includes(q);
+    const skuMatch = p.variants.some((v) => v.sku && v.sku.toLowerCase().includes(q));
+    return titleMatch || skuMatch;
+  });
+
+  const productOptions = (filteredProducts.length > 0 ? filteredProducts : products).map((p) => ({
     label: p.title,
     value: p.id,
   }));
 
   const triggerVariantOptions = (selectedTriggerProduct?.variants || []).map((v) => ({
-    label: `${v.title} (${v.currencyCode} ${v.price.toFixed(2)})`,
+    label: `${v.title}${v.sku ? ` (SKU: ${v.sku})` : ""} — ${v.currencyCode} ${v.price.toFixed(2)}`,
     value: v.id,
   }));
 
   const offeredVariantOptions = (selectedOfferedProduct?.variants || []).map((v) => ({
-    label: `${v.title} (${v.currencyCode} ${v.price.toFixed(2)})`,
+    label: `${v.title}${v.sku ? ` (SKU: ${v.sku})` : ""} — ${v.currencyCode} ${v.price.toFixed(2)}`,
     value: v.id,
   }));
 
@@ -271,11 +364,31 @@ export default function NewOfferCheckScreen() {
   return (
     <Page
       title="Check an offer"
-      subtitle="Configure your trigger condition, proposed offered item, and discount parameters."
+      subtitle="Configure your trigger condition, proposed offered item, discount parameters, and bundle quantity."
       backAction={{ content: "Home", onAction: () => navigate("/app") }}
     >
       <Form method="post">
+        {duplicateCheck && (
+          <input type="hidden" name="duplicatedFromId" value={duplicateCheck.id} />
+        )}
+
         <BlockStack gap="500">
+          {duplicateCheck && (
+            <Banner tone="info" title="Duplicating Previous Offer Check">
+              <p>
+                Form parameters pre-filled from check recorded on{" "}
+                <strong>
+                  {new Date(duplicateCheck.createdAt).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </strong>
+                . Adjust the proposed discount, quantity, or scenario parameters below. Running the check will save a separate, independent audit record.
+              </p>
+            </Banner>
+          )}
+
           {actionData?.errors && (
             <Banner tone="critical" title="Please review input errors">
               <ul style={{ margin: 0, paddingLeft: "16px" }}>
@@ -285,6 +398,25 @@ export default function NewOfferCheckScreen() {
               </ul>
             </Banner>
           )}
+
+          {/* Product Quick Search Filter (Requirement 16) */}
+          <Card>
+            <BlockStack gap="200">
+              <Text as="h3" variant="headingSm">
+                Catalog Search & Quick Filter
+              </Text>
+              <TextField
+                label="Search catalog products or SKUs"
+                value={productSearch}
+                onChange={setProductSearch}
+                placeholder="Filter by product title or variant SKU..."
+                autoComplete="off"
+                clearButton
+                onClearButtonClick={() => setProductSearch("")}
+                helpText="Filters the dropdown menus below in real time. Items are bound strictly by stable Shopify IDs."
+              />
+            </BlockStack>
+          </Card>
 
           <Layout>
             <Layout.Section>
@@ -335,8 +467,12 @@ export default function NewOfferCheckScreen() {
                           {selectedTriggerVariant && (
                             <Text as="span" variant="bodySm" tone="subdued">
                               Variant: {selectedTriggerVariant.title} • Price: {selectedTriggerVariant.currencyCode} {selectedTriggerVariant.price.toFixed(2)}
+                              {selectedTriggerVariant.sku ? ` • SKU: ${selectedTriggerVariant.sku}` : " • (No SKU)"}
                             </Text>
                           )}
+                          <Text as="span" variant="bodyXs" tone="subdued">
+                            Shopify GID: <code>{selectedTriggerVariant?.id || selectedTriggerProduct.id}</code>
+                          </Text>
                         </BlockStack>
                       </InlineStack>
                     </Box>
@@ -392,25 +528,44 @@ export default function NewOfferCheckScreen() {
                             {selectedOfferedVariant && (
                               <Text as="span" variant="bodySm" tone="subdued">
                                 Variant: {selectedOfferedVariant.title} • Current Price: {selectedOfferedVariant.currencyCode} {selectedOfferedVariant.price.toFixed(2)}
+                                {selectedOfferedVariant.sku ? ` • SKU: ${selectedOfferedVariant.sku}` : " • (No SKU)"}
                                 {selectedOfferedVariant.unitCost !== null ? (
-                                  ` • Unit Cost: ${selectedOfferedVariant.currencyCode} ${selectedOfferedVariant.unitCost.toFixed(2)}`
+                                  ` • Shopify Unit Cost: ${selectedOfferedVariant.currencyCode} ${selectedOfferedVariant.unitCost.toFixed(2)}`
                                 ) : (
                                   " • (Unit cost not set in Shopify)"
                                 )}
                               </Text>
                             )}
+                            <Text as="span" variant="bodyXs" tone="subdued">
+                              Shopify GID: <code>{selectedOfferedVariant?.id || selectedOfferedProduct.id}</code>
+                            </Text>
                           </BlockStack>
                         </InlineStack>
                       </Box>
 
-                      {/* First-Run Guidance for Missing Unit Cost */}
+                      {/* Missing Unit Cost & Optional Manual Assumption (Requirement 15) */}
                       {selectedOfferedVariant && selectedOfferedVariant.unitCost === null && (
-                        <Banner tone="warning" title="Missing Unit Cost in Shopify">
-                          <p>
-                            This variant has no unit cost configured in Shopify. Profit can’t be estimated and this check will require review.
-                            To enable profit calculations, open <strong>Shopify Admin &gt; Products</strong>, select this variant, and enter a <strong>Cost per item</strong> under Pricing.
-                          </p>
-                        </Banner>
+                        <Card background="bg-surface-secondary">
+                          <BlockStack gap="300">
+                            <Banner tone="warning" title="Missing Unit Cost in Shopify">
+                              <p>
+                                This variant has no unit cost in Shopify. Profit can’t be estimated unless a cost is recorded.
+                                You can configure <strong>Cost per item</strong> in Shopify Admin, or optionally provide an advisory cost assumption below.
+                              </p>
+                            </Banner>
+                            <TextField
+                              label="Optional Merchant Cost Assumption (Per Unit)"
+                              name="customCostAssumption"
+                              type="number"
+                              value={customCostAssumption}
+                              onChange={setCustomCostAssumption}
+                              autoComplete="off"
+                              placeholder="e.g. 12.50"
+                              helpText="If entered, PromoLint will use this assumption to estimate gross margin for this check. The audit snapshot will clearly label this as a manual assumption and will never overwrite Shopify's data."
+                              error={actionData?.errors?.customCostAssumption}
+                            />
+                          </BlockStack>
+                        </Card>
                       )}
 
                       {/* Guidance for Untracked Inventory */}
@@ -427,29 +582,37 @@ export default function NewOfferCheckScreen() {
                 </BlockStack>
               </Card>
 
-              {/* Step 3: Proposed Discount & Location */}
+              {/* Step 3: Proposed Discount, Quantity & Location (Requirements 11 & 12) */}
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    3. Proposed Discount & Inventory Location
+                    3. Proposed Discount, Offer Quantity & Location
                   </Text>
 
-                  <InlineStack gap="400" wrap={false}>
-                    <Box minWidth="200px">
+                  <InlineStack gap="400" wrap={true}>
+                    <Box minWidth="220px">
                       <Select
-                        label="Discount Type"
+                        label="Discount Scenario Type"
                         name="discountType"
                         options={[
-                          { label: "Percentage (%)", value: "PERCENTAGE" },
-                          { label: "Fixed Amount ($)", value: "FIXED_AMOUNT" },
+                          { label: "Percentage Off (%)", value: "PERCENTAGE" },
+                          { label: "Fixed Amount Off ($)", value: "FIXED_AMOUNT" },
+                          { label: "Fixed Offer Price ($)", value: "FIXED_PRICE" },
                         ]}
                         value={discountType}
                         onChange={(val) => setDiscountType(val as DiscountType)}
                       />
                     </Box>
-                    <Box width="100%">
+
+                    <Box minWidth="180px">
                       <TextField
-                        label={discountType === "PERCENTAGE" ? "Discount Percentage (%)" : "Fixed Discount Amount"}
+                        label={
+                          discountType === "PERCENTAGE"
+                            ? "Discount Percentage (%)"
+                            : discountType === "FIXED_AMOUNT"
+                            ? "Fixed Amount Off ($)"
+                            : "Fixed Offer Price ($)"
+                        }
                         name="discountValue"
                         type="number"
                         value={discountValue}
@@ -457,10 +620,25 @@ export default function NewOfferCheckScreen() {
                         autoComplete="off"
                         helpText={
                           discountType === "PERCENTAGE"
-                            ? "E.g. 20 for a 20% discount"
-                            : "E.g. 10.00 for a $10.00 discount"
+                            ? "E.g. 20 for 20% off"
+                            : discountType === "FIXED_AMOUNT"
+                            ? "E.g. 5.00 for $5.00 off"
+                            : "E.g. 15.00 for a $15.00 offer price"
                         }
                         error={actionData?.errors?.discountValue}
+                      />
+                    </Box>
+
+                    <Box minWidth="150px">
+                      <TextField
+                        label="Offer Quantity (Bundle units)"
+                        name="offerQuantity"
+                        type="number"
+                        value={offerQuantity}
+                        onChange={setOfferQuantity}
+                        autoComplete="off"
+                        helpText="Units offered per purchase (e.g. 1 for single, 2+ for bundle)"
+                        error={actionData?.errors?.offerQuantity}
                       />
                     </Box>
                   </InlineStack>
@@ -474,6 +652,57 @@ export default function NewOfferCheckScreen() {
                     helpText="Point-in-time stock availability will be audited strictly for this selected location. Stock at other fulfillment locations is not included."
                     error={actionData?.errors?.locationId}
                   />
+
+                  {/* Live Reactive Pricing & Break-Even Preview (Requirements 12 & 13) */}
+                  {previewData && (
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text as="h3" variant="headingSm">
+                            Pre-Audit Calculation Preview
+                          </Text>
+                          <Badge tone="info">Live Preview</Badge>
+                        </InlineStack>
+                        <Divider />
+                        <InlineStack gap="600" wrap={true}>
+                          <Box minWidth="140px">
+                            <Text as="span" variant="bodyXs" tone="subdued">Catalog Price</Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              ${previewData.currentPrice.toFixed(2)}
+                            </Text>
+                          </Box>
+                          <Box minWidth="160px">
+                            <Text as="span" variant="bodyXs" tone="subdued">Estimated Selling Price</Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="bold">
+                              ${previewData.unitSellingPrice.toFixed(2)} / unit
+                            </Text>
+                          </Box>
+                          {previewData.quantity > 1 && (
+                            <Box minWidth="160px">
+                              <Text as="span" variant="bodyXs" tone="subdued">Bundle Revenue ({previewData.quantity} units)</Text>
+                              <br />
+                              <Text as="span" variant="bodyMd" fontWeight="semibold">
+                                ${previewData.totalRevenue.toFixed(2)} total
+                              </Text>
+                            </Box>
+                          )}
+                          <Box minWidth="180px">
+                            <Text as="span" variant="bodyXs" tone="subdued">
+                              Break-Even Min. Price (Target {settings.minMarginThreshold}%)
+                            </Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              {previewData.breakEven.targetMarginPrice !== null
+                                ? `$${previewData.breakEven.targetMarginPrice.toFixed(2)} (Max discount: $${previewData.breakEven.maxDiscountAmount?.toFixed(2)})`
+                                : "Requires unit cost"}
+                            </Text>
+                          </Box>
+                        </InlineStack>
+                      </BlockStack>
+                    </Box>
+                  )}
 
                   <Divider />
 
@@ -492,28 +721,29 @@ export default function NewOfferCheckScreen() {
               <Card>
                 <BlockStack gap="300">
                   <Text as="h3" variant="headingSm">
-                    How PromoLint Works
+                    Advisory Threshold Preferences
                   </Text>
-                  <Text as="p" variant="bodySm">
-                    PromoLint performs an honest, multi-point pre-launch audit:
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    Store preference thresholds: Minimum margin: <strong>{settings.minMarginThreshold}%</strong>, Minimum stock: <strong>{settings.minStockThreshold} units</strong>.
+                    These are internal merchant preferences used solely for audit linting, not Shopify platform limits or revenue guarantees.
                   </Text>
-                  <ul style={{ margin: 0, paddingLeft: "16px", fontSize: "13px", lineHeight: "1.5" }}>
-                    <li>Estimates unit gross profit & margin using live catalog prices and unit costs.</li>
-                    <li>Audits point-in-time stock levels at your chosen location.</li>
-                    <li>Checks active store discount combination permissions.</li>
-                  </ul>
+
                   <Divider />
+
                   <Text as="h3" variant="headingSm">
-                    Advisory Scope & Disclaimers
+                    Multi-Unit & Bundle Audits
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    • <strong>Exclusions:</strong> Shipping fees, sales taxes, payment gateway processing fees (e.g. 2.9% + 30¢), packaging, and customer returns are excluded from gross profit calculations.
+                    Setting quantity &gt; 1 simulates a bundle offer. PromoLint audits total revenue, total unit cost, and checks whether available location inventory can fulfill the bundle size.
+                  </Text>
+
+                  <Divider />
+
+                  <Text as="h3" variant="headingSm">
+                    Explicit Exclusions
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    • <strong>Discount Findings:</strong> Discount findings inspect combination rules configured in Shopify. Shopper eligibility, cart items, and Shopify checkout logic determine actual final prices.
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    • <strong>No Storefront Changes:</strong> PromoLint is an admin audit tool and does not publish promotions, modify themes, or change checkout.
+                    Gross profit estimates explicitly exclude shipping, sales taxes, payment gateway processing fees (e.g. 2.9% + 30¢), packaging, and customer returns.
                   </Text>
                 </BlockStack>
               </Card>

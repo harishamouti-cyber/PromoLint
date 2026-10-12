@@ -3,7 +3,7 @@
  * Pure domain logic for offer QA, profit estimates, stock analysis, and discount compatibility warnings.
  */
 
-export type DiscountType = "PERCENTAGE" | "FIXED_AMOUNT";
+export type DiscountType = "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_PRICE";
 
 export type WarningSeverity = "BLOCKER" | "WARNING" | "INFO";
 
@@ -23,6 +23,16 @@ export interface OfferWarning {
   findingLevel: FindingLevel;
 }
 
+export interface BreakEvenResult {
+  breakEvenPrice: number | null; // Selling price to achieve exactly $0 profit (unit cost)
+  targetMarginPrice: number | null; // Selling price to achieve the target gross margin %
+  maxDiscountAmount: number | null; // Max discount in dollars from catalog price
+  maxDiscountPercentage: number | null; // Max discount % from catalog price
+  targetMarginPercentage: number;
+  costAvailable: boolean;
+  explanation: string;
+}
+
 export interface ProfitResult {
   discountedPrice: number;
   unitCost: number | null;
@@ -30,6 +40,10 @@ export interface ProfitResult {
   grossProfit: number | null;
   grossMargin: number | null;
   costMissing: boolean;
+  quantity: number;
+  totalRevenue: number;
+  totalCost: number | null;
+  totalGrossProfit: number | null;
   warnings: OfferWarning[];
 }
 
@@ -63,6 +77,8 @@ export interface DiscountAnalysisResult {
 export interface EvaluateOfferParams {
   currentPrice: number;
   unitCost: number | null | undefined;
+  customCostAssumption?: number | null;
+  offerQuantity?: number;
   discountType: DiscountType;
   discountValue: number;
   currencyCode?: string;
@@ -81,11 +97,16 @@ export interface EvaluateOfferParams {
 
 export interface OfferEvaluationResult {
   status: "READY" | "REVIEW" | "BLOCKED";
+  offerQuantity: number;
   discountedPrice: number;
   unitCost: number | null;
   costSource: string;
   estimatedGrossProfit: number | null;
   estimatedGrossMargin: number | null;
+  totalRevenue: number;
+  totalCost: number | null;
+  totalGrossProfit: number | null;
+  breakEven: BreakEvenResult;
   inventoryQuantity: number | null;
   inventoryTracked: boolean;
   inventoryState: InventoryState;
@@ -129,6 +150,7 @@ export function roundPercentage(pct: number): number {
 
 /**
  * Calculate the discounted unit price based on discount type and value.
+ * Supports PERCENTAGE, FIXED_AMOUNT, and FIXED_PRICE.
  */
 export function calculateDiscountedPrice(
   currentPrice: number,
@@ -136,35 +158,92 @@ export function calculateDiscountedPrice(
   discountValue: number
 ): number {
   const safePrice = Math.max(0, roundToCents(currentPrice));
-  const safeDiscount = Math.max(0, discountValue);
+  const safeValue = Math.max(0, discountValue);
 
   if (discountType === "PERCENTAGE") {
-    if (safeDiscount >= 100) {
+    if (safeValue >= 100) {
       return 0;
     }
-    const ratio = (100 - safeDiscount) / 100;
+    const ratio = (100 - safeValue) / 100;
     return roundToCents(safePrice * ratio);
-  } else {
-    // FIXED_AMOUNT
-    const remaining = safePrice - roundToCents(safeDiscount);
+  } else if (discountType === "FIXED_AMOUNT") {
+    const remaining = safePrice - roundToCents(safeValue);
     return Math.max(0, roundToCents(remaining));
+  } else {
+    // FIXED_PRICE: The discountValue is the proposed price directly
+    return roundToCents(safeValue);
   }
+}
+
+/**
+ * Calculate break-even price and maximum allowable discount to satisfy target gross margin.
+ */
+export function calculateBreakEven(
+  currentPrice: number,
+  unitCost: number | null | undefined,
+  targetMarginThreshold = 20.0
+): BreakEvenResult {
+  if (unitCost === null || unitCost === undefined || isNaN(unitCost) || unitCost < 0) {
+    return {
+      breakEvenPrice: null,
+      targetMarginPrice: null,
+      maxDiscountAmount: null,
+      maxDiscountPercentage: null,
+      targetMarginPercentage: targetMarginThreshold,
+      costAvailable: false,
+      explanation:
+        "Break-even benchmarks and maximum allowable discount cannot be calculated without a unit cost. Add a cost in Shopify or provide a cost assumption.",
+    };
+  }
+
+  const safeCost = roundToCents(unitCost);
+  const safePrice = Math.max(0, roundToCents(currentPrice));
+
+  // Pure break-even (0% profit) is selling at unit cost
+  const breakEvenPrice = safeCost;
+
+  // Target margin price: Price where (Price - Cost) / Price = M / 100
+  // Price * (1 - M/100) = Cost => Price = Cost / (1 - M/100)
+  let targetMarginPrice = safeCost;
+  if (targetMarginThreshold < 100) {
+    targetMarginPrice = roundToCents(safeCost / (1 - targetMarginThreshold / 100));
+  }
+
+  // Maximum allowable discount from catalog price to maintain target margin
+  const maxDiscountAmount = Math.max(0, roundToCents(safePrice - targetMarginPrice));
+  const maxDiscountPercentage =
+    safePrice > 0 ? roundPercentage((maxDiscountAmount / safePrice) * 100) : 0;
+
+  return {
+    breakEvenPrice,
+    targetMarginPrice,
+    maxDiscountAmount,
+    maxDiscountPercentage,
+    targetMarginPercentage: targetMarginThreshold,
+    costAvailable: true,
+    explanation: `To achieve your advisory gross margin threshold of ${targetMarginThreshold}%, this variant cannot sell below ${targetMarginPrice}. The maximum allowable discount from catalog price (${safePrice}) is ${maxDiscountAmount} (${maxDiscountPercentage}% off). Excludes shipping, taxes, and operating fees.`,
+  };
 }
 
 /**
  * Calculate estimated gross profit and gross margin percentage.
  * Only returns calculations supported by available data.
+ * Supports offer quantity and custom cost assumptions.
  */
 export function calculateProfit(
   currentPrice: number,
   discountType: DiscountType,
   discountValue: number,
-  unitCost: number | null | undefined,
-  minMarginThreshold = 20.0
+  shopifyUnitCost: number | null | undefined,
+  minMarginThreshold = 20.0,
+  quantity = 1,
+  customCostAssumption?: number | null
 ): ProfitResult {
   const warnings: OfferWarning[] = [];
+  const safeQuantity = Math.max(1, Math.floor(quantity));
   const discountedPrice = calculateDiscountedPrice(currentPrice, discountType, discountValue);
 
+  // Validate discount boundaries
   if (discountType === "PERCENTAGE" && discountValue >= 100) {
     warnings.push({
       code: "FREE_OR_NEGATIVE_PRICE",
@@ -179,17 +258,65 @@ export function calculateProfit(
       severity: "BLOCKER",
       findingLevel: "Warning",
     });
+  } else if (discountType === "FIXED_PRICE") {
+    if (discountValue <= 0) {
+      warnings.push({
+        code: "FREE_OR_NEGATIVE_PRICE",
+        message: "Proposed offer price is $0.00 or negative, resulting in a free giveaway.",
+        severity: "BLOCKER",
+        findingLevel: "Warning",
+      });
+    } else if (discountValue >= currentPrice) {
+      warnings.push({
+        code: "OFFER_PRICE_EXCEEDS_CATALOG",
+        message: `Proposed offer price (${discountValue}) meets or exceeds the current catalog price (${currentPrice}). No discount incentive is provided in this scenario.`,
+        severity: "INFO",
+        findingLevel: "Good to know",
+      });
+    }
   }
 
-  // Cost handling: if null, undefined, or NaN, do NOT assume zero!
-  if (unitCost === null || unitCost === undefined || isNaN(unitCost)) {
+  // Cost handling: prioritize Shopify cost; if missing, check for merchant assumption
+  let effectiveUnitCost: number | null = null;
+  let costSource = "None (Missing in Shopify)";
+  let costMissing = true;
+
+  const hasShopifyCost =
+    shopifyUnitCost !== null &&
+    shopifyUnitCost !== undefined &&
+    !isNaN(shopifyUnitCost) &&
+    shopifyUnitCost >= 0;
+
+  const hasCustomAssumption =
+    customCostAssumption !== null &&
+    customCostAssumption !== undefined &&
+    !isNaN(customCostAssumption) &&
+    customCostAssumption >= 0;
+
+  if (hasShopifyCost) {
+    effectiveUnitCost = roundToCents(shopifyUnitCost);
+    costSource = "Shopify Variant inventoryItem.unitCost";
+    costMissing = false;
+  } else if (hasCustomAssumption) {
+    effectiveUnitCost = roundToCents(customCostAssumption);
+    costSource = `Merchant manual cost assumption (${effectiveUnitCost}) — Not recorded in Shopify`;
+    costMissing = false;
+    warnings.push({
+      code: "MANUAL_COST_ASSUMPTION_USED",
+      message: `Gross profit calculations use your merchant-entered cost assumption of ${effectiveUnitCost} per unit. This cost assumption is not verified or saved in Shopify.`,
+      severity: "INFO",
+      findingLevel: "Good to know",
+    });
+  } else {
     warnings.push({
       code: "MISSING_PRODUCT_COST",
-      message: "Profit can’t be estimated because no unit cost is recorded in Shopify for this variant. To provide the missing cost, open Shopify Admin > Products, select the variant, and enter a Cost per item under Pricing.",
+      message:
+        "Profit can’t be estimated because no unit cost is recorded in Shopify for this variant. To provide a cost, open Shopify Admin > Products, select the variant, and enter a Cost per item under Pricing, or provide a cost assumption.",
       severity: "WARNING",
       findingLevel: "Unable to verify",
     });
 
+    const totalRevenue = roundToCents(discountedPrice * safeQuantity);
     return {
       discountedPrice,
       unitCost: null,
@@ -197,12 +324,15 @@ export function calculateProfit(
       grossProfit: null,
       grossMargin: null,
       costMissing: true,
+      quantity: safeQuantity,
+      totalRevenue,
+      totalCost: null,
+      totalGrossProfit: null,
       warnings,
     };
   }
 
-  const safeCost = roundToCents(unitCost);
-  const grossProfit = roundToCents(discountedPrice - safeCost);
+  const grossProfit = roundToCents(discountedPrice - effectiveUnitCost);
 
   let grossMargin: number | null = null;
   if (discountedPrice > 0) {
@@ -227,19 +357,28 @@ export function calculateProfit(
     });
   }
 
+  // Multi-unit totals for bundle and multi-item audits
+  const totalRevenue = roundToCents(discountedPrice * safeQuantity);
+  const totalCost = roundToCents(effectiveUnitCost * safeQuantity);
+  const totalGrossProfit = roundToCents(grossProfit * safeQuantity);
+
   return {
     discountedPrice,
-    unitCost: safeCost,
-    costSource: "Shopify Variant inventoryItem.unitCost",
+    unitCost: effectiveUnitCost,
+    costSource,
     grossProfit,
     grossMargin,
     costMissing: false,
+    quantity: safeQuantity,
+    totalRevenue,
+    totalCost,
+    totalGrossProfit,
     warnings,
   };
 }
 
 /**
- * Analyze inventory levels against threshold and tracking configuration.
+ * Analyze inventory levels against threshold, quantity, and tracking configuration.
  * Distinct states: IN_STOCK, LOW_STOCK, OUT_OF_STOCK, NOT_TRACKED, UNABLE_TO_VERIFY.
  * Never treats untracked inventory as unlimited stock.
  */
@@ -248,9 +387,11 @@ export function analyzeInventory(
   isTracked: boolean,
   locationName: string,
   minStockThreshold = 5,
-  hasInventoryRecord = true
+  hasInventoryRecord = true,
+  offerQuantity = 1
 ): InventoryAnalysisResult {
   const warnings: OfferWarning[] = [];
+  const safeOfferQty = Math.max(1, Math.floor(offerQuantity));
 
   // State 1: Untracked in Shopify
   if (!isTracked) {
@@ -322,6 +463,24 @@ export function analyzeInventory(
       quantity,
       isTracked: true,
       inventoryState: "OUT_OF_STOCK",
+      locationName,
+      warnings,
+    };
+  }
+
+  // Check if stock is insufficient for the requested multi-unit bundle quantity
+  if (quantity < safeOfferQty) {
+    warnings.push({
+      code: "INSUFFICIENT_STOCK_FOR_QUANTITY",
+      message: `Selected location has only ${quantity} units available, which is less than the scenario offer quantity of ${safeOfferQty} units. Fulfilling an order for this bundle will exhaust or oversell inventory at ${locationName}.`,
+      severity: "BLOCKER",
+      findingLevel: "Warning",
+    });
+
+    return {
+      quantity,
+      isTracked: true,
+      inventoryState: "LOW_STOCK",
       locationName,
       warnings,
     };
@@ -417,6 +576,7 @@ export function analyzeDiscounts(
  */
 export function evaluateOfferCheck(params: EvaluateOfferParams): OfferEvaluationResult {
   const allWarnings: OfferWarning[] = [];
+  const offerQuantity = Math.max(1, Math.floor(params.offerQuantity || 1));
 
   // 1. Profit & Pricing Analysis
   const profitAnalysis = calculateProfit(
@@ -424,25 +584,35 @@ export function evaluateOfferCheck(params: EvaluateOfferParams): OfferEvaluation
     params.discountType,
     params.discountValue,
     params.unitCost,
-    params.minMarginThreshold
+    params.minMarginThreshold,
+    offerQuantity,
+    params.customCostAssumption
   );
   allWarnings.push(...profitAnalysis.warnings);
 
-  // 2. Inventory Analysis with distinct states
+  // 2. Break-Even Benchmark Analysis
+  const breakEven = calculateBreakEven(
+    params.currentPrice,
+    profitAnalysis.unitCost,
+    params.minMarginThreshold
+  );
+
+  // 3. Inventory Analysis with distinct states & bundle quantity check
   const inventoryAnalysis = analyzeInventory(
     params.inventoryQuantity,
     params.inventoryTracked,
     params.locationName,
     params.minStockThreshold,
-    params.hasInventoryRecord ?? true
+    params.hasInventoryRecord ?? true,
+    offerQuantity
   );
   allWarnings.push(...inventoryAnalysis.warnings);
 
-  // 3. Discount Compatibility Analysis
+  // 4. Discount Compatibility Analysis
   const discountAnalysis = analyzeDiscounts(params.discountData);
   allWarnings.push(...discountAnalysis.warnings);
 
-  // 4. Determine overall status
+  // 5. Determine overall status
   let status: "READY" | "REVIEW" | "BLOCKED" = "READY";
   if (allWarnings.some((w) => w.severity === "BLOCKER")) {
     status = "BLOCKED";
@@ -469,11 +639,16 @@ export function evaluateOfferCheck(params: EvaluateOfferParams): OfferEvaluation
 
   return {
     status,
+    offerQuantity,
     discountedPrice: profitAnalysis.discountedPrice,
     unitCost: profitAnalysis.unitCost,
     costSource: profitAnalysis.costSource,
     estimatedGrossProfit: profitAnalysis.grossProfit,
     estimatedGrossMargin: profitAnalysis.grossMargin,
+    totalRevenue: profitAnalysis.totalRevenue,
+    totalCost: profitAnalysis.totalCost,
+    totalGrossProfit: profitAnalysis.totalGrossProfit,
+    breakEven,
     inventoryQuantity: inventoryAnalysis.quantity,
     inventoryTracked: inventoryAnalysis.isTracked,
     inventoryState: inventoryAnalysis.inventoryState,

@@ -78,6 +78,8 @@ export default function CheckResultDetailScreen() {
   const isDeleting = navigation.formData?.get("intent") === "delete";
   const isRechecking = navigation.formData?.get("intent") === "recheck";
 
+  const isManualCost = check.costSource?.includes("Merchant manual cost assumption");
+
   const renderStatusBadge = (status: string) => {
     switch (status) {
       case "READY":
@@ -183,6 +185,10 @@ export default function CheckResultDetailScreen() {
       backAction={{ content: "Offer checks", onAction: () => navigate("/app/checks") }}
       secondaryActions={[
         {
+          content: "Duplicate check",
+          onAction: () => navigate(`/app/new?duplicateId=${check.id}`),
+        },
+        {
           content: "Run new check",
           onAction: () => navigate("/app/new"),
         },
@@ -202,7 +208,7 @@ export default function CheckResultDetailScreen() {
               <li>Open <strong>Shopify Admin &gt; Products</strong> and select this product.</li>
               <li>Scroll to <strong>Variants</strong> and click the variant.</li>
               <li>Enter a value in <strong>Cost per item</strong> under Pricing and click Save.</li>
-              <li>Click <strong>Re-check with live data</strong> below to generate an updated audit snapshot.</li>
+              <li>Click <strong>Recheck current data</strong> below to generate an updated audit snapshot.</li>
             </ol>
           </Banner>
         )}
@@ -297,6 +303,109 @@ export default function CheckResultDetailScreen() {
                     </BlockStack>
                   </Box>
                 </InlineStack>
+
+                {/* Multi-Unit Scenario Totals (Requirement 11) */}
+                {check.offerQuantity && check.offerQuantity > 1 && (
+                  <>
+                    <Divider />
+                    <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                      <BlockStack gap="200">
+                        <InlineStack align="space-between" blockAlign="center">
+                          <Text as="h3" variant="headingSm">
+                            Multi-Unit Bundle Totals ({check.offerQuantity} units offered)
+                          </Text>
+                          <Badge tone="info">Bundle Scenario</Badge>
+                        </InlineStack>
+                        <InlineStack gap="600" wrap={true}>
+                          <Box minWidth="140px">
+                            <Text as="span" variant="bodyXs" tone="subdued">Total Bundle Revenue</Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              {check.currencyCode} {check.totalRevenue?.toFixed(2) || (check.discountedPrice * check.offerQuantity).toFixed(2)}
+                            </Text>
+                          </Box>
+                          <Box minWidth="140px">
+                            <Text as="span" variant="bodyXs" tone="subdued">Total Bundle Cost</Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="semibold">
+                              {check.totalCost !== null && check.totalCost !== undefined
+                                ? `${check.currencyCode} ${check.totalCost.toFixed(2)}`
+                                : "Requires unit cost"}
+                            </Text>
+                          </Box>
+                          <Box minWidth="160px">
+                            <Text as="span" variant="bodyXs" tone="subdued">Total Bundle Gross Profit</Text>
+                            <br />
+                            <Text as="span" variant="bodyMd" fontWeight="bold">
+                              {check.totalGrossProfit !== null && check.totalGrossProfit !== undefined
+                                ? `${check.currencyCode} ${check.totalGrossProfit.toFixed(2)}`
+                                : "Profit can’t be estimated"}
+                            </Text>
+                          </Box>
+                        </InlineStack>
+                      </BlockStack>
+                    </Box>
+                  </>
+                )}
+              </BlockStack>
+            </Card>
+
+            {/* Break-Even & Target Margin View (Requirement 13) */}
+            <Card>
+              <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text as="h2" variant="headingMd">
+                    Break-Even & Maximum Discount Benchmark
+                  </Text>
+                  <Badge tone="info">Advisory Benchmark</Badge>
+                </InlineStack>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Theoretical pricing thresholds based on recorded unit cost. Helps identify how steep a discount can be before eroding profit margins:
+                </Text>
+                <Divider />
+
+                <InlineStack gap="600" wrap={true}>
+                  <Box minWidth="180px">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodySm" tone="subdued">0% Profit Price (Unit Cost)</Text>
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        {check.unitCost !== null
+                          ? `${check.currencyCode} ${check.unitCost.toFixed(2)}`
+                          : "Requires unit cost"}
+                      </Text>
+                      <Text as="span" variant="bodyXs" tone="subdued">Selling below this causes direct loss</Text>
+                    </BlockStack>
+                  </Box>
+
+                  <Box minWidth="200px">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodySm" tone="subdued">Target Margin Min. Selling Price</Text>
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        {check.breakEvenPrice !== null && check.breakEvenPrice !== undefined
+                          ? `${check.currencyCode} ${check.breakEvenPrice.toFixed(2)}`
+                          : "Requires unit cost"}
+                      </Text>
+                      <Text as="span" variant="bodyXs" tone="subdued">Price needed to maintain advisory target margin</Text>
+                    </BlockStack>
+                  </Box>
+
+                  <Box minWidth="200px">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodySm" tone="subdued">Max Allowable Discount</Text>
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        {check.maxDiscountAmount !== null && check.maxDiscountAmount !== undefined
+                          ? `${check.currencyCode} ${check.maxDiscountAmount.toFixed(2)}`
+                          : "Requires unit cost"}
+                      </Text>
+                      <Text as="span" variant="bodyXs" tone="subdued">From catalog price without breaching margin threshold</Text>
+                    </BlockStack>
+                  </Box>
+                </InlineStack>
+
+                <Divider />
+                <Text as="p" variant="bodyXs" tone="subdued">
+                  Assumptions: Break-even figures reflect direct merchandise cost only and exclude shipping expenses, sales taxes, payment gateway processing fees, packaging, and operating costs.
+                </Text>
               </BlockStack>
             </Card>
 
@@ -325,24 +434,31 @@ export default function CheckResultDetailScreen() {
                     <Text as="span" variant="bodyMd" fontWeight="semibold">
                       {check.discountType === "PERCENTAGE"
                         ? `${check.discountValue}% off (-${check.currencyCode} ${(check.currentPrice - check.discountedPrice).toFixed(2)})`
-                        : `${check.currencyCode} ${check.discountValue.toFixed(2)} off`}
+                        : check.discountType === "FIXED_AMOUNT"
+                        ? `${check.currencyCode} ${check.discountValue.toFixed(2)} off`
+                        : `Fixed offer price: ${check.currencyCode} ${check.discountValue.toFixed(2)} (-${check.currencyCode} ${(check.currentPrice - check.discountedPrice).toFixed(2)} off)`}
                     </Text>
                   </InlineStack>
 
                   <InlineStack align="space-between">
                     <Text as="span" variant="bodyMd">3. Estimated Selling Price</Text>
                     <Text as="span" variant="bodyMd" fontWeight="semibold">
-                      {check.currencyCode} {check.discountedPrice.toFixed(2)}
+                      {check.currencyCode} {check.discountedPrice.toFixed(2)} per unit
                     </Text>
                   </InlineStack>
 
                   <InlineStack align="space-between">
                     <Text as="span" variant="bodyMd">4. Unit Cost</Text>
-                    <Text as="span" variant="bodyMd" fontWeight="semibold">
-                      {check.unitCost !== null
-                        ? `${check.currencyCode} ${check.unitCost.toFixed(2)} (${check.costSource || "Shopify inventoryItem.unitCost"})`
-                        : "Missing in Shopify"}
-                    </Text>
+                    <InlineStack gap="100" blockAlign="center">
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        {check.unitCost !== null
+                          ? `${check.currencyCode} ${check.unitCost.toFixed(2)}`
+                          : "Missing in Shopify"}
+                      </Text>
+                      {isManualCost && (
+                        <Badge tone="attention">Merchant Manual Assumption</Badge>
+                      )}
+                    </InlineStack>
                   </InlineStack>
 
                   <Divider />
@@ -410,8 +526,18 @@ export default function CheckResultDetailScreen() {
                     <BlockStack gap="050">
                       <Text as="span" variant="bodySm" tone="subdued">Proposed Discount</Text>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {check.discountType === "PERCENTAGE" ? `${check.discountValue}% off` : `${check.currencyCode} ${check.discountValue.toFixed(2)} off`}
+                        {check.discountType === "PERCENTAGE"
+                          ? `${check.discountValue}% off`
+                          : check.discountType === "FIXED_AMOUNT"
+                          ? `${check.currencyCode} ${check.discountValue.toFixed(2)} off`
+                          : `Fixed offer price: ${check.currencyCode} ${check.discountValue.toFixed(2)}`}
                       </Text>
+                    </BlockStack>
+                  </Box>
+                  <Box minWidth="200px">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodySm" tone="subdued">Offer Quantity</Text>
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">{check.offerQuantity || 1} unit(s)</Text>
                     </BlockStack>
                   </Box>
                   <Box minWidth="200px">
@@ -517,7 +643,9 @@ export default function CheckResultDetailScreen() {
                     {check.triggerProductTitle}
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Variant: {check.triggerVariantTitle} • Shopify GID: <code>{check.triggerVariantId}</code>
+                    Variant: {check.triggerVariantTitle}
+                    {check.triggerVariantSku ? ` • SKU: ${check.triggerVariantSku}` : " • (No SKU)"}
+                    {" • "}Shopify GID: <code>{check.triggerVariantId}</code>
                   </Text>
                   <Text as="p" variant="bodyXs" tone="subdued">
                     Scenario input only. PromoLint audits a proposed scenario; it does not enforce cart conditions, publish promotions, or create an upsell on your storefront.
@@ -544,15 +672,22 @@ export default function CheckResultDetailScreen() {
                         {check.offeredProductTitle}
                       </Text>
                       <Text as="span" variant="bodySm" tone="subdued">
-                        Variant: {check.offeredVariantTitle} • Shopify GID: <code>{check.offeredVariantId}</code>
+                        Variant: {check.offeredVariantTitle}
+                        {check.offeredVariantSku ? ` • SKU: ${check.offeredVariantSku}` : " • (No SKU)"}
+                        {" • "}Shopify GID: <code>{check.offeredVariantId}</code>
                       </Text>
                       <Text as="span" variant="bodySm">
                         Proposed Discount:{" "}
                         <strong>
                           {check.discountType === "PERCENTAGE"
-                            ? `${check.discountValue}%`
-                            : `${check.currencyCode} ${check.discountValue.toFixed(2)}`}
+                            ? `${check.discountValue}% off`
+                            : check.discountType === "FIXED_AMOUNT"
+                            ? `${check.currencyCode} ${check.discountValue.toFixed(2)} off`
+                            : `Fixed price: ${check.currencyCode} ${check.discountValue.toFixed(2)}`}
                         </strong>
+                        {check.offerQuantity && check.offerQuantity > 1 && (
+                          <span> • Quantity: <strong>{check.offerQuantity} units</strong></span>
+                        )}
                       </Text>
                     </BlockStack>
                   </InlineStack>
@@ -568,20 +703,29 @@ export default function CheckResultDetailScreen() {
                 <Text as="h3" variant="headingSm">
                   Actions
                 </Text>
+
+                {/* Recheck current data (Requirement 18) */}
                 <Form method="post">
                   <input type="hidden" name="intent" value="recheck" />
                   <Button
                     variant="primary"
                     submit
                     loading={isRechecking}
-                    helpText="Queries current catalog prices, unit costs, stock, and discounts to create a new time-stamped result snapshot."
+                    helpText="Queries current catalog prices, unit costs, stock, and discounts to create a new time-stamped result snapshot without altering this historical record."
                   >
-                    Re-check with live data
+                    Recheck current data
                   </Button>
                 </Form>
+
+                {/* Duplicate check as starting point (Requirement 19) */}
+                <Button onClick={() => navigate(`/app/new?duplicateId=${check.id}`)}>
+                  Duplicate check
+                </Button>
+
                 <Button onClick={() => navigate("/app/new")}>
                   Run another check
                 </Button>
+
                 <Form method="post">
                   <input type="hidden" name="intent" value="delete" />
                   <Button
@@ -605,7 +749,7 @@ export default function CheckResultDetailScreen() {
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   This report is an immutable point-in-time snapshot. Historical records never silently change when catalog prices or costs update.
-                  Clicking <strong>Re-check with live data</strong> queries current live Shopify data and creates a new timestamped snapshot record.
+                  Clicking <strong>Recheck current data</strong> queries current live Shopify data and creates a new timestamped snapshot record.
                 </Text>
 
                 <Divider />

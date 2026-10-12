@@ -43,12 +43,15 @@ model OfferCheck {
   triggerProductTitle    String
   triggerVariantId       String
   triggerVariantTitle    String
+  triggerVariantSku      String?
   offeredProductId       String
   offeredProductTitle    String
   offeredVariantId       String
   offeredVariantTitle    String
+  offeredVariantSku      String?
   offeredProductImageUrl String?
-  discountType           String   // "PERCENTAGE" | "FIXED_AMOUNT"
+  offerQuantity          Int      @default(1)
+  discountType           String   // "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_PRICE"
   discountValue          Float
   currencyCode           String   @default("USD")
   currentPrice           Float
@@ -57,6 +60,11 @@ model OfferCheck {
   discountedPrice        Float
   estimatedGrossProfit   Float?
   estimatedGrossMargin   Float?
+  totalRevenue           Float?
+  totalCost              Float?
+  totalGrossProfit       Float?
+  breakEvenPrice         Float?
+  maxDiscountAmount      Float?
   locationId             String
   locationName           String
   inventoryQuantity      Int?
@@ -66,6 +74,7 @@ model OfferCheck {
   assumptions            String
   discountAssumptions    String?
   recheckOfId            String?
+  duplicatedFromId       String?
 
   @@index([shop, createdAt])
 }
