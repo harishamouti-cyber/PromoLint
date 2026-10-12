@@ -292,10 +292,10 @@ export default function NewOfferCheckScreen() {
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    1. Scenario Trigger Item (Baseline Condition)
+                    1. Scenario Input: Trigger Product (Baseline Condition)
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    The baseline item in your proposed promotion scenario. PromoLint is an admin audit tool and does not publish offers, inject cart conditions, or enforce storefront rules.
+                    The baseline product in your proposed offer scenario. PromoLint audits a proposed scenario; it does not enforce cart conditions, publish promotions, or create an upsell on your storefront.
                   </Text>
 
                   <Select
@@ -348,7 +348,7 @@ export default function NewOfferCheckScreen() {
               <Card>
                 <BlockStack gap="400">
                   <Text as="h2" variant="headingMd">
-                    2. Offered Product (Proposed Incentive)
+                    2. Scenario Input: Offered Product (Proposed Incentive)
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
                     The product and variant evaluated as a proposed upsell, reward, or bundle incentive in this scenario.
@@ -407,19 +407,18 @@ export default function NewOfferCheckScreen() {
                       {selectedOfferedVariant && selectedOfferedVariant.unitCost === null && (
                         <Banner tone="warning" title="Missing Unit Cost in Shopify">
                           <p>
-                            This variant has no unit cost configured in Shopify. Gross profit and margin cannot be estimated,
-                            and this offer cannot produce a Ready status. To enable profit calculations, set <strong>Cost per item</strong> under
-                            Products &gt; Variants in Shopify Admin.
+                            This variant has no unit cost configured in Shopify. Profit can’t be estimated and this check will require review.
+                            To enable profit calculations, open <strong>Shopify Admin &gt; Products</strong>, select this variant, and enter a <strong>Cost per item</strong> under Pricing.
                           </p>
                         </Banner>
                       )}
 
                       {/* Guidance for Untracked Inventory */}
                       {selectedOfferedVariant && selectedOfferedVariant.inventoryManagement !== "SHOPIFY" && (
-                        <Banner tone="info" title="Untracked Inventory">
+                        <Banner tone="info" title="Inventory not tracked">
                           <p>
-                            Inventory tracking is not enabled for this variant in Shopify. PromoLint will record this as an untracked
-                            item and will not constrain stock counts at your selected location.
+                            Inventory tracking is disabled for this variant in Shopify. PromoLint records this as untracked.
+                            Untracked inventory does not mean unlimited stock; physical availability cannot be monitored or verified at your selected location.
                           </p>
                         </Banner>
                       )}
@@ -472,7 +471,7 @@ export default function NewOfferCheckScreen() {
                     options={locationOptions}
                     value={locationId}
                     onChange={setLocationId}
-                    helpText="Point-in-time stock availability will be queried for this location upon running the check."
+                    helpText="Point-in-time stock availability will be audited strictly for this selected location. Stock at other fulfillment locations is not included."
                     error={actionData?.errors?.locationId}
                   />
 

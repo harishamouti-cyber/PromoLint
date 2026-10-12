@@ -90,7 +90,7 @@ export default function OfferChecksListScreen() {
               itemCount={checks.length}
               headings={[
                 { title: "Status" },
-                { title: "Trigger Product" },
+                { title: "Scenario Trigger Product" },
                 { title: "Offered Product" },
                 { title: "Discount" },
                 { title: "Est. Gross Profit" },
@@ -141,13 +141,17 @@ export default function OfferChecksListScreen() {
                       </Text>
                     ) : (
                       <Text as="span" tone="subdued">
-                        Cost missing
+                        Profit can’t be estimated
                       </Text>
                     )}
                   </IndexTable.Cell>
                   <IndexTable.Cell>
                     <Text as="span" variant="bodySm">
                       {check.locationName}
+                    </Text>
+                    <br />
+                    <Text as="span" variant="bodyXs" tone="subdued">
+                      Single location
                     </Text>
                   </IndexTable.Cell>
                   <IndexTable.Cell>

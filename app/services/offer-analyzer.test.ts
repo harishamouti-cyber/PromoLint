@@ -55,23 +55,26 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       const res = calculateProfit(100, "PERCENTAGE", 20, 40, 20);
       expect(res.discountedPrice).toBe(80);
       expect(res.unitCost).toBe(40);
+      expect(res.costSource).toBe("Shopify Variant inventoryItem.unitCost");
       expect(res.grossProfit).toBe(40);
       expect(res.grossMargin).toBe(50);
       expect(res.costMissing).toBe(false);
       expect(res.warnings.some((w) => w.severity === "BLOCKER")).toBe(false);
     });
 
-    it("does NOT assume zero when unit cost is missing (shows required prompt)", () => {
+    it("does NOT assume zero when unit cost is missing (shows Profit can't be estimated)", () => {
       const resNull = calculateProfit(100, "PERCENTAGE", 20, null);
       expect(resNull.costMissing).toBe(true);
       expect(resNull.unitCost).toBeNull();
       expect(resNull.grossProfit).toBeNull();
       expect(resNull.grossMargin).toBeNull();
+      expect(resNull.costSource).toBe("None (Missing in Shopify)");
       expect(resNull.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code: "MISSING_PRODUCT_COST",
             severity: "WARNING",
+            findingLevel: "Unable to verify",
           }),
         ])
       );
@@ -81,7 +84,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       expect(resUndef.grossProfit).toBeNull();
     });
 
-    it("triggers a BLOCKER when offer sells below unit cost (negative profit)", () => {
+    it("triggers a Warning when offer sells below unit cost (negative profit)", () => {
       // Current $50, $30 fixed off -> $20. Cost is $25. Loss is $5.
       const res = calculateProfit(50, "FIXED_AMOUNT", 30, 25);
       expect(res.discountedPrice).toBe(20);
@@ -92,12 +95,13 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "SELLING_BELOW_COST",
             severity: "BLOCKER",
+            findingLevel: "Warning",
           }),
         ])
       );
     });
 
-    it("triggers a WARNING when gross margin is below merchant threshold", () => {
+    it("triggers a Review finding when gross margin is below merchant threshold", () => {
       // Selling price $100, cost $85 -> profit $15, margin 15%. Threshold 20%.
       const res = calculateProfit(100, "PERCENTAGE", 0, 85, 20);
       expect(res.grossMargin).toBe(15);
@@ -106,6 +110,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "MARGIN_BELOW_THRESHOLD",
             severity: "WARNING",
+            findingLevel: "Review",
           }),
         ])
       );
@@ -119,6 +124,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "FREE_OR_NEGATIVE_PRICE",
             severity: "BLOCKER",
+            findingLevel: "Warning",
           }),
         ])
       );
@@ -130,67 +136,72 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "DISCOUNT_EXCEEDS_PRICE",
             severity: "BLOCKER",
+            findingLevel: "Warning",
           }),
         ])
       );
     });
   });
 
-  describe("Inventory Status & Threshold Analysis", () => {
-    it("identifies untracked inventory and gives an informational note", () => {
+  describe("Inventory Status & 5 Distinct States", () => {
+    it("identifies untracked inventory (NOT_TRACKED) and clarifies not unlimited stock", () => {
       const res = analyzeInventory(null, false, "Warehouse A", 5);
       expect(res.isTracked).toBe(false);
-      expect(res.inventoryState).toBe("UNTRACKED");
+      expect(res.inventoryState).toBe("NOT_TRACKED");
       expect(res.quantity).toBeNull();
       expect(res.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
-            code: "INVENTORY_UNTRACKED",
+            code: "INVENTORY_NOT_TRACKED",
             severity: "INFO",
+            findingLevel: "Good to know",
           }),
         ])
       );
     });
 
-    it("identifies missing inventory record at selected location", () => {
+    it("identifies missing inventory record as UNABLE_TO_VERIFY", () => {
       const res = analyzeInventory(null, true, "Remote Depot", 5, false);
       expect(res.isTracked).toBe(true);
-      expect(res.inventoryState).toBe("MISSING_RECORD");
+      expect(res.inventoryState).toBe("UNABLE_TO_VERIFY");
       expect(res.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code: "INVENTORY_RECORD_MISSING",
             severity: "WARNING",
+            findingLevel: "Unable to verify",
           }),
         ])
       );
     });
 
-    it("blocks launch if tracked inventory is 0 (out of stock) or negative (oversold)", () => {
+    it("blocks launch if tracked inventory is 0 or negative (OUT_OF_STOCK)", () => {
       const resZero = analyzeInventory(0, true, "Main Store", 5);
-      expect(resZero.inventoryState).toBe("ZERO_STOCK");
+      expect(resZero.inventoryState).toBe("OUT_OF_STOCK");
       expect(resZero.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code: "OUT_OF_STOCK",
             severity: "BLOCKER",
+            findingLevel: "Warning",
           }),
         ])
       );
 
       const resNeg = analyzeInventory(-2, true, "Main Store", 5);
-      expect(resNeg.inventoryState).toBe("ZERO_STOCK");
+      expect(resNeg.inventoryState).toBe("OUT_OF_STOCK");
       expect(resNeg.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code: "OUT_OF_STOCK",
             severity: "BLOCKER",
+            findingLevel: "Warning",
           }),
         ])
       );
     });
 
-    it("triggers a review warning if stock is below configured threshold", () => {
+    it("triggers a Review finding if stock is below configured threshold (LOW_STOCK)", () => {
       const res = analyzeInventory(3, true, "Main Store", 5);
       expect(res.quantity).toBe(3);
       expect(res.inventoryState).toBe("LOW_STOCK");
@@ -199,25 +210,27 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "LOW_STOCK_THRESHOLD",
             severity: "WARNING",
+            findingLevel: "Review",
           }),
         ])
       );
     });
 
-    it("passes with no inventory warnings when stock is healthy", () => {
+    it("passes with no inventory warnings when stock is in stock (IN_STOCK)", () => {
       const res = analyzeInventory(25, true, "Main Store", 5);
-      expect(res.inventoryState).toBe("HEALTHY");
+      expect(res.inventoryState).toBe("IN_STOCK");
       expect(res.warnings).toHaveLength(0);
     });
 
-    it("warns when tracked inventory level cannot be retrieved (unavailable)", () => {
+    it("marks UNABLE_TO_VERIFY when tracked inventory level cannot be retrieved", () => {
       const res = analyzeInventory(null, true, "Main Store", 5, true);
-      expect(res.inventoryState).toBe("UNAVAILABLE");
+      expect(res.inventoryState).toBe("UNABLE_TO_VERIFY");
       expect(res.warnings).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code: "INVENTORY_UNAVAILABLE",
             severity: "WARNING",
+            findingLevel: "Unable to verify",
           }),
         ])
       );
@@ -225,7 +238,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
   });
 
   describe("Discount Compatibility Analysis", () => {
-    it("reports warning when discount check data is unavailable instead of pretending no conflicts", () => {
+    it("reports Unable to verify when discount check data is unavailable instead of pretending no conflicts", () => {
       const res = analyzeDiscounts({
         available: false,
         unavailableReason: "Access scope read_discounts missing",
@@ -236,12 +249,13 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "DISCOUNT_CHECK_UNAVAILABLE",
             severity: "WARNING",
+            findingLevel: "Unable to verify",
           }),
         ])
       );
     });
 
-    it("warns about active store discounts that allow stacking / combinations", () => {
+    it("warns about active store discounts that allow stacking / combinations without claiming checkout simulation", () => {
       const res = analyzeDiscounts({
         available: true,
         activeDiscounts: [
@@ -262,6 +276,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
           expect.objectContaining({
             code: "STACKABLE_DISCOUNTS_DETECTED",
             severity: "WARNING",
+            findingLevel: "Review",
           }),
         ])
       );
@@ -287,7 +302,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
     });
   });
 
-  describe("Full Offer Evaluation Flow", () => {
+  describe("Full Offer Evaluation Flow & Status Invariants", () => {
     it("returns READY when all conditions pass cleanly", () => {
       const result = evaluateOfferCheck({
         currentPrice: 100,
@@ -309,10 +324,12 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       expect(result.discountedPrice).toBe(85);
       expect(result.estimatedGrossProfit).toBe(45);
       expect(result.estimatedGrossMargin).toBe(52.94);
-      expect(result.inventoryState).toBe("HEALTHY");
+      expect(result.inventoryState).toBe("IN_STOCK");
+      expect(result.costSource).toBe("Shopify Variant inventoryItem.unitCost");
       expect(result.warnings.some((w) => w.severity === "BLOCKER")).toBe(false);
       expect(result.warnings.some((w) => w.severity === "WARNING")).toBe(false);
       expect(result.assumptions).toContain("Estimated gross profit per unit");
+      expect(result.discountAssumptions).toContain("combinesWith");
     });
 
     it("strictly prevents READY status when unit cost is missing (returns REVIEW)", () => {
@@ -336,7 +353,49 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       expect(result.status).not.toBe("READY");
       expect(result.estimatedGrossProfit).toBeNull();
       expect(result.estimatedGrossMargin).toBeNull();
+      expect(result.costSource).toBe("None (Missing in Shopify)");
       expect(result.warnings.some((w) => w.code === "MISSING_PRODUCT_COST")).toBe(true);
+    });
+
+    it("strictly prevents READY status when inventory is unable to verify", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: 40,
+        discountType: "PERCENTAGE",
+        discountValue: 15,
+        inventoryQuantity: null,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: true,
+          activeDiscounts: [],
+        },
+      });
+
+      expect(result.status).toBe("REVIEW");
+      expect(result.inventoryState).toBe("UNABLE_TO_VERIFY");
+    });
+
+    it("strictly prevents READY status when discount data is unavailable", () => {
+      const result = evaluateOfferCheck({
+        currentPrice: 100,
+        unitCost: 40,
+        discountType: "PERCENTAGE",
+        discountValue: 15,
+        inventoryQuantity: 20,
+        inventoryTracked: true,
+        locationName: "Main Store",
+        minStockThreshold: 5,
+        minMarginThreshold: 20,
+        discountData: {
+          available: false,
+          unavailableReason: "Network timeout",
+        },
+      });
+
+      expect(result.status).toBe("REVIEW");
     });
 
     it("returns BLOCKED when selling below unit cost", () => {
@@ -379,7 +438,7 @@ describe("PromoLint Offer Analyzer - Calculation & Domain Rules", () => {
       });
 
       expect(result.status).toBe("BLOCKED");
-      expect(result.inventoryState).toBe("ZERO_STOCK");
+      expect(result.inventoryState).toBe("OUT_OF_STOCK");
       expect(result.warnings.some((w) => w.code === "OUT_OF_STOCK")).toBe(true);
     });
   });

@@ -91,28 +91,54 @@ export default function CheckResultDetailScreen() {
     }
   };
 
+  const renderFindingLevelBadge = (w: OfferWarning) => {
+    const level = w.findingLevel || (
+      w.severity === "BLOCKER" ? "Warning" :
+      w.severity === "WARNING" ? "Review" : "Good to know"
+    );
+
+    switch (level) {
+      case "Warning":
+        return <Badge tone="critical">Warning</Badge>;
+      case "Review":
+        return <Badge tone="warning">Review</Badge>;
+      case "Unable to verify":
+        return <Badge tone="attention">Unable to verify</Badge>;
+      case "Good to know":
+      default:
+        return <Badge tone="info">Good to know</Badge>;
+    }
+  };
+
   const renderInventoryStateBadge = (
     state: string | null | undefined,
     quantity: number | null,
     isTracked: boolean
   ) => {
     switch (state) {
+      case "NOT_TRACKED":
       case "UNTRACKED":
-        return <Badge tone="info">Untracked in Shopify</Badge>;
+        return <Badge tone="info">Inventory not tracked</Badge>;
+      case "UNABLE_TO_VERIFY":
       case "MISSING_RECORD":
-        return <Badge tone="warning">No record at location</Badge>;
       case "UNAVAILABLE":
-        return <Badge tone="warning">Data unavailable</Badge>;
+        return <Badge tone="warning">Unable to verify</Badge>;
+      case "OUT_OF_STOCK":
       case "ZERO_STOCK":
-        return <Badge tone="critical">{quantity !== null && quantity < 0 ? `${quantity} units (Oversold)` : "0 units (Out of stock)"}</Badge>;
+        return (
+          <Badge tone="critical">
+            {quantity !== null && quantity < 0 ? `Out of stock (${quantity} units oversold)` : "Out of stock (0 units)"}
+          </Badge>
+        );
       case "LOW_STOCK":
-        return <Badge tone="warning">{`${quantity} units (Low stock)`}</Badge>;
+        return <Badge tone="warning">{`Low stock (${quantity} units)`}</Badge>;
+      case "IN_STOCK":
       case "HEALTHY":
-        return <Badge tone="success">{`${quantity} units (Available)`}</Badge>;
+        return <Badge tone="success">{`In stock (${quantity} units)`}</Badge>;
       default:
-        if (!isTracked) return <Badge tone="info">Untracked in Shopify</Badge>;
-        if (quantity === 0) return <Badge tone="critical">0 units (Out of stock)</Badge>;
-        return <Badge>{quantity !== null ? `${quantity} units` : "Unavailable"}</Badge>;
+        if (!isTracked) return <Badge tone="info">Inventory not tracked</Badge>;
+        if (quantity === 0) return <Badge tone="critical">Out of stock (0 units)</Badge>;
+        return <Badge>{quantity !== null ? `${quantity} units` : "Unable to verify"}</Badge>;
     }
   };
 
@@ -121,7 +147,7 @@ export default function CheckResultDetailScreen() {
       return (
         <Banner tone="critical" title="Offer Blocked — Critical Issues Detected">
           <p>
-            Critical blockers were identified (such as selling below unit cost, out-of-stock inventory, or price-exceeding discounts).
+            Critical blockers were identified (such as selling below unit cost, out-of-stock inventory, or discounts exceeding product price).
             We recommend revising promotion parameters or restocking before launching.
           </p>
         </Banner>
@@ -132,16 +158,16 @@ export default function CheckResultDetailScreen() {
         <Banner tone="warning" title="Offer Needs Review — Caution Advised">
           <p>
             Potential risks require merchant attention (e.g. missing unit cost preventing profit estimation, stock below your configured threshold,
-            or active store discounts with combination permissions enabled).
+            unverified data, or active store discounts with combination permissions enabled).
           </p>
         </Banner>
       );
     }
     return (
-      <Banner tone="success" title="Offer Ready — Pre-Flight Passed">
+      <Banner tone="success" title="Pre-Launch Checks Passed (Ready for Review)">
         <p>
-          All automated checks passed with positive estimated gross margin, verified inventory at the selected
-          location, and no immediate configuration blockers.
+          Automated pre-flight checks passed based on available catalog data, positive estimated gross margin, and verified inventory at the selected location.
+          <strong> Note:</strong> A Ready status reflects automated pre-launch linting against store settings; it does not guarantee customer sales, final checkout price, or net business profitability.
         </p>
       </Banner>
     );
@@ -167,7 +193,7 @@ export default function CheckResultDetailScreen() {
 
         {/* First-Run Guidance for Missing Unit Cost */}
         {check.unitCost === null && (
-          <Banner tone="warning" title="Missing Unit Cost Guidance">
+          <Banner tone="warning" title="Profit Can’t Be Estimated (Missing Unit Cost)">
             <p>
               Shopify has no unit cost recorded for this variant. Because PromoLint adheres to zero-mock calculations,
               gross profit and margin cannot be fabricated. To unlock profit estimates on future checks:
@@ -175,7 +201,7 @@ export default function CheckResultDetailScreen() {
             <ol style={{ margin: "8px 0 0 0", paddingLeft: "20px" }}>
               <li>Open <strong>Shopify Admin &gt; Products</strong> and select this product.</li>
               <li>Scroll to <strong>Variants</strong> and click the variant.</li>
-              <li>Enter a value in <strong>Cost per item</strong> and save.</li>
+              <li>Enter a value in <strong>Cost per item</strong> under Pricing and click Save.</li>
               <li>Click <strong>Re-check with live data</strong> below to generate an updated audit snapshot.</li>
             </ol>
           </Banner>
@@ -226,7 +252,7 @@ export default function CheckResultDetailScreen() {
                         </Text>
                       ) : (
                         <Text as="span" variant="bodyMd" tone="caution">
-                          Cost not set
+                          Profit can’t be estimated
                         </Text>
                       )}
                       <Text as="span" variant="bodyXs" tone="subdued">
@@ -249,8 +275,8 @@ export default function CheckResultDetailScreen() {
                           {check.estimatedGrossMargin.toFixed(1)}%
                         </Text>
                       ) : (
-                        <Text as="span" variant="bodyMd" tone="subdued">
-                          N/A
+                        <Text as="span" variant="bodyMd" tone="caution">
+                          Margin can’t be estimated
                         </Text>
                       )}
                       <Text as="span" variant="bodyXs" tone="subdued">
@@ -274,7 +300,94 @@ export default function CheckResultDetailScreen() {
               </BlockStack>
             </Card>
 
-            {/* Comprehensive Parameters Breakdown (Priority 4) */}
+            {/* Transparent Calculation Breakdown (Requirement 4) */}
+            <Card>
+              <BlockStack gap="400">
+                <Text as="h2" variant="headingMd">
+                  Calculation Breakdown & Formula
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  Transparent step-by-step calculations supported by available Shopify data. Figures are never fabricated:
+                </Text>
+
+                <Divider />
+
+                <BlockStack gap="300">
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">1. Catalog Price</Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      {check.currencyCode} {check.currentPrice.toFixed(2)}
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">2. Proposed Discount</Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      {check.discountType === "PERCENTAGE"
+                        ? `${check.discountValue}% off (-${check.currencyCode} ${(check.currentPrice - check.discountedPrice).toFixed(2)})`
+                        : `${check.currencyCode} ${check.discountValue.toFixed(2)} off`}
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">3. Estimated Selling Price</Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      {check.currencyCode} {check.discountedPrice.toFixed(2)}
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd">4. Unit Cost</Text>
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">
+                      {check.unitCost !== null
+                        ? `${check.currencyCode} ${check.unitCost.toFixed(2)} (${check.costSource || "Shopify inventoryItem.unitCost"})`
+                        : "Missing in Shopify"}
+                    </Text>
+                  </InlineStack>
+
+                  <Divider />
+
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">5. Estimated Gross Profit</Text>
+                    <Text as="span" variant="bodyMd" fontWeight="bold">
+                      {check.estimatedGrossProfit !== null
+                        ? `${check.currencyCode} ${check.estimatedGrossProfit.toFixed(2)} (Selling price − Unit cost)`
+                        : "Profit can’t be estimated"}
+                    </Text>
+                  </InlineStack>
+
+                  <InlineStack align="space-between">
+                    <Text as="span" variant="bodyMd" fontWeight="semibold">6. Estimated Gross Margin</Text>
+                    <Text as="span" variant="bodyMd" fontWeight="bold">
+                      {check.estimatedGrossMargin !== null
+                        ? `${check.estimatedGrossMargin.toFixed(1)}% (Gross profit ÷ Selling price)`
+                        : "Margin can’t be estimated"}
+                    </Text>
+                  </InlineStack>
+                </BlockStack>
+
+                <Divider />
+
+                <BlockStack gap="100">
+                  <Text as="h3" variant="headingSm">
+                    Explicit Financial Exclusions (Gross Profit Disclaimers)
+                  </Text>
+                  <Text as="p" variant="bodySm" tone="subdued">
+                    This figure measures estimated selling price − unit cost only. The following real-world expenses are explicitly excluded:
+                  </Text>
+                  <ul style={{ margin: 0, paddingLeft: "16px", fontSize: "12px", color: "var(--p-color-text-subdued)" }}>
+                    <li>Customer shipping fees and carrier freight charges</li>
+                    <li>Sales taxes, VAT, GST, and international customs duties</li>
+                    <li>Payment gateway processing transaction fees (e.g. 2.9% + 30¢)</li>
+                    <li>Packaging materials, boxes, and warehouse fulfillment labor</li>
+                    <li>Customer return, replacement, and refund allowances</li>
+                    <li>Operating overhead, marketing, and acquisition costs</li>
+                  </ul>
+                </BlockStack>
+              </BlockStack>
+            </Card>
+
+            {/* Audit Parameters & Retrieved Values (Requirement 8) */}
             <Card>
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">
@@ -313,21 +426,24 @@ export default function CheckResultDetailScreen() {
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
                         {check.unitCost !== null ? `${check.currencyCode} ${check.unitCost.toFixed(2)}` : "Missing in Shopify"}
                       </Text>
-                    </BlockStack>
-                  </Box>
-                  <Box minWidth="200px">
-                    <BlockStack gap="050">
-                      <Text as="span" variant="bodySm" tone="subdued">Gross Profit Estimate</Text>
-                      <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {check.estimatedGrossProfit !== null ? `${check.currencyCode} ${check.estimatedGrossProfit.toFixed(2)}` : "Cannot calculate"}
+                      <Text as="span" variant="bodyXs" tone="subdued">
+                        Source: {check.costSource || "Shopify inventoryItem.unitCost"}
                       </Text>
                     </BlockStack>
                   </Box>
                   <Box minWidth="200px">
                     <BlockStack gap="050">
-                      <Text as="span" variant="bodySm" tone="subdued">Gross Margin Estimate</Text>
+                      <Text as="span" variant="bodySm" tone="subdued">Estimated Gross Profit</Text>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
-                        {check.estimatedGrossMargin !== null ? `${check.estimatedGrossMargin.toFixed(1)}%` : "N/A"}
+                        {check.estimatedGrossProfit !== null ? `${check.currencyCode} ${check.estimatedGrossProfit.toFixed(2)}` : "Profit can’t be estimated"}
+                      </Text>
+                    </BlockStack>
+                  </Box>
+                  <Box minWidth="200px">
+                    <BlockStack gap="050">
+                      <Text as="span" variant="bodySm" tone="subdued">Estimated Gross Margin</Text>
+                      <Text as="span" variant="bodyMd" fontWeight="semibold">
+                        {check.estimatedGrossMargin !== null ? `${check.estimatedGrossMargin.toFixed(1)}%` : "Margin can’t be estimated"}
                       </Text>
                     </BlockStack>
                   </Box>
@@ -335,41 +451,32 @@ export default function CheckResultDetailScreen() {
                     <BlockStack gap="050">
                       <Text as="span" variant="bodySm" tone="subdued">Audited Location</Text>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">{check.locationName}</Text>
+                      <Text as="span" variant="bodyXs" tone="subdued">
+                        Applies strictly to {check.locationName} (ID: {check.locationId})
+                      </Text>
                     </BlockStack>
                   </Box>
                   <Box minWidth="200px">
                     <BlockStack gap="050">
-                      <Text as="span" variant="bodySm" tone="subdued">Inventory State at Location</Text>
+                      <Text as="span" variant="bodySm" tone="subdued">Inventory State</Text>
                       <Text as="span" variant="bodyMd" fontWeight="semibold">
                         {check.inventoryTracked
                           ? check.inventoryQuantity !== null
                             ? `${check.inventoryQuantity} units observed`
-                            : "Unavailable"
-                          : "Untracked in Shopify"}
+                            : "Unable to verify"
+                          : "Inventory not tracked"}
                       </Text>
                     </BlockStack>
                   </Box>
                 </InlineStack>
-
-                <Divider />
-
-                <BlockStack gap="100">
-                  <Text as="h3" variant="headingSm">
-                    Explicit Exclusions from Gross Profit
-                  </Text>
-                  <Text as="p" variant="bodySm" tone="subdued">
-                    This estimate strictly measures <code>discounted price − unit cost</code>. The following expenses are explicitly excluded:
-                    customer shipping fees, sales taxes and duties, payment processor fees (e.g. 2.9% + 30¢), packaging materials, warehouse handling, and customer refund allowances.
-                  </Text>
-                </BlockStack>
               </BlockStack>
             </Card>
 
-            {/* Audit Findings & Warnings */}
+            {/* Audit Findings & Warnings (Requirement 10) */}
             <Card>
               <BlockStack gap="400">
                 <Text as="h2" variant="headingMd">
-                  Audit Findings & Warnings ({warnings.length})
+                  Audit Findings ({warnings.length})
                 </Text>
 
                 {warnings.length === 0 ? (
@@ -381,17 +488,7 @@ export default function CheckResultDetailScreen() {
                     {warnings.map((w, idx) => (
                       <List.Item key={idx}>
                         <InlineStack gap="200" blockAlign="start">
-                          <Badge
-                            tone={
-                              w.severity === "BLOCKER"
-                                ? "critical"
-                                : w.severity === "WARNING"
-                                ? "warning"
-                                : "info"
-                            }
-                          >
-                            {w.severity}
-                          </Badge>
+                          {renderFindingLevelBadge(w)}
                           <Text as="span" variant="bodyMd">
                             {w.message}
                           </Text>
@@ -411,16 +508,19 @@ export default function CheckResultDetailScreen() {
                 </Text>
                 <Divider />
 
-                {/* Scenario Trigger Product */}
+                {/* Scenario Trigger Product (Requirement 7) */}
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm" tone="subdued">
-                    Scenario Trigger Item (Baseline Condition)
+                    Scenario Input: Trigger Product (Baseline Condition)
                   </Text>
                   <Text as="p" variant="bodyMd" fontWeight="semibold">
                     {check.triggerProductTitle}
                   </Text>
                   <Text as="p" variant="bodySm" tone="subdued">
-                    Variant: {check.triggerVariantTitle} • Shopify ID: <code>{check.triggerVariantId}</code>
+                    Variant: {check.triggerVariantTitle} • Shopify GID: <code>{check.triggerVariantId}</code>
+                  </Text>
+                  <Text as="p" variant="bodyXs" tone="subdued">
+                    Scenario input only. PromoLint audits a proposed scenario; it does not enforce cart conditions, publish promotions, or create an upsell on your storefront.
                   </Text>
                 </BlockStack>
 
@@ -429,7 +529,7 @@ export default function CheckResultDetailScreen() {
                 {/* Offered Product */}
                 <BlockStack gap="200">
                   <Text as="h3" variant="headingSm" tone="subdued">
-                    Offered Incentive Item & Discount
+                    Scenario Input: Offered Incentive Item & Proposed Discount
                   </Text>
                   <InlineStack gap="300" blockAlign="center">
                     {check.offeredProductImageUrl && (
@@ -444,7 +544,7 @@ export default function CheckResultDetailScreen() {
                         {check.offeredProductTitle}
                       </Text>
                       <Text as="span" variant="bodySm" tone="subdued">
-                        Variant: {check.offeredVariantTitle} • Shopify ID: <code>{check.offeredVariantId}</code>
+                        Variant: {check.offeredVariantTitle} • Shopify GID: <code>{check.offeredVariantId}</code>
                       </Text>
                       <Text as="span" variant="bodySm">
                         Proposed Discount:{" "}
@@ -501,17 +601,26 @@ export default function CheckResultDetailScreen() {
                 <Divider />
 
                 <Text as="h3" variant="headingSm">
-                  Snapshot Integrity
+                  Immutable Audit Snapshot
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
-                  This report is a permanent point-in-time snapshot. Re-checking queries live Shopify data and generates
-                  a new audit record rather than overwriting historical evidence.
+                  This report is an immutable point-in-time snapshot. Historical records never silently change when catalog prices or costs update.
+                  Clicking <strong>Re-check with live data</strong> queries current live Shopify data and creates a new timestamped snapshot record.
                 </Text>
 
                 <Divider />
 
                 <Text as="h3" variant="headingSm">
-                  Assumptions & Scope
+                  Discount Stacking Assumptions
+                </Text>
+                <Text as="p" variant="bodySm" tone="subdued">
+                  {check.discountAssumptions || "PromoLint inspects combination permissions (combinesWith) on active Shopify discounts. This is an advisory configuration check, not a live checkout simulation."}
+                </Text>
+
+                <Divider />
+
+                <Text as="h3" variant="headingSm">
+                  General Assumptions & Scope
                 </Text>
                 <Text as="p" variant="bodySm" tone="subdued">
                   {check.assumptions}

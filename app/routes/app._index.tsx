@@ -185,7 +185,7 @@ export default function HomeScreen() {
                   itemCount={checks.length}
                   headings={[
                     { title: "Status" },
-                    { title: "Trigger Product" },
+                    { title: "Scenario Trigger Product" },
                     { title: "Offered Product" },
                     { title: "Discount" },
                     { title: "Est. Gross Profit" },
@@ -235,7 +235,7 @@ export default function HomeScreen() {
                           </Text>
                         ) : (
                           <Text as="span" tone="subdued">
-                            Cost missing
+                            Profit can’t be estimated
                           </Text>
                         )}
                       </IndexTable.Cell>

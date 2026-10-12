@@ -52,6 +52,7 @@ export async function createOfferCheck(input: CreateOfferCheckInput) {
       currencyCode: input.currencyCode || "USD",
       currentPrice: input.currentPrice,
       unitCost: input.evaluation.unitCost,
+      costSource: input.evaluation.costSource,
       discountedPrice: input.evaluation.discountedPrice,
       estimatedGrossProfit: input.evaluation.estimatedGrossProfit,
       estimatedGrossMargin: input.evaluation.estimatedGrossMargin,
@@ -62,6 +63,7 @@ export async function createOfferCheck(input: CreateOfferCheckInput) {
       inventoryState: input.evaluation.inventoryState,
       warnings: JSON.stringify(input.evaluation.warnings),
       assumptions: input.evaluation.assumptions,
+      discountAssumptions: input.evaluation.discountAssumptions,
       recheckOfId: input.recheckOfId || null,
     },
   });

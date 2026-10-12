@@ -53,6 +53,7 @@ model OfferCheck {
   currencyCode           String   @default("USD")
   currentPrice           Float
   unitCost               Float?
+  costSource             String?  @default("Shopify inventoryItem.unitCost")
   discountedPrice        Float
   estimatedGrossProfit   Float?
   estimatedGrossMargin   Float?
@@ -60,9 +61,10 @@ model OfferCheck {
   locationName           String
   inventoryQuantity      Int?
   inventoryTracked       Boolean  @default(true)
-  inventoryState         String?  @default("HEALTHY") // "UNTRACKED" | "MISSING_RECORD" | "ZERO_STOCK" | "LOW_STOCK" | "HEALTHY" | "UNAVAILABLE"
+  inventoryState         String?  @default("IN_STOCK") // "IN_STOCK" | "LOW_STOCK" | "OUT_OF_STOCK" | "NOT_TRACKED" | "UNABLE_TO_VERIFY"
   warnings               String   // JSON stringified array of Warning objects
   assumptions            String
+  discountAssumptions    String?
   recheckOfId            String?
 
   @@index([shop, createdAt])
