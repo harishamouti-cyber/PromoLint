@@ -33,17 +33,19 @@ import {
   calculateBreakEven,
   type DiscountType,
 } from "../services/offer-analyzer";
+import { checkSubscriptionStatus } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
   const url = new URL(request.url);
   const duplicateId = url.searchParams.get("duplicateId");
 
-  const [products, locations, settings, duplicateCheck] = await Promise.all([
+  const [products, locations, settings, duplicateCheck, billingStatus] = await Promise.all([
     fetchProductsForOfferCheck(admin, undefined, 50),
     fetchStoreLocations(admin, 20),
     getShopSettings(session.shop),
     duplicateId ? getOfferCheckById(session.shop, duplicateId) : Promise.resolve(null),
+    checkSubscriptionStatus(billing, session.shop),
   ]);
 
   return json({
@@ -51,11 +53,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     locations,
     settings,
     duplicateCheck,
+    billingStatus,
   });
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
+  const billingStatus = await checkSubscriptionStatus(billing, session.shop);
+
+  const errors: Record<string, string> = {};
+
+  if (!billingStatus.hasActivePro && billingStatus.freeChecksUsed >= billingStatus.freeCheckLimit) {
+    errors._planLimit = `You have reached the Free Tier limit of ${billingStatus.freeCheckLimit} offer audits. Upgrade to PromoLint Pro ($19.99/mo, 3-day free trial) for unlimited audits.`;
+    return json({ errors }, { status: 403 });
+  }
+
   const formData = await request.formData();
 
   const triggerProductId = formData.get("triggerProductId") as string;
@@ -69,7 +81,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const locationId = formData.get("locationId") as string;
   const duplicatedFromId = formData.get("duplicatedFromId") as string;
 
-  const errors: Record<string, string> = {};
 
   if (!triggerProductId) errors.triggerProductId = "Please select a trigger product.";
   if (!triggerVariantId) errors.triggerVariantId = "Please select a trigger variant.";
@@ -117,11 +128,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const offeredVariant = offeredProduct?.variants.find((v) => v.id === offeredVariantId);
 
   if (!triggerProduct || !triggerVariant) {
-    return json({ errors: { triggerProductId: "Selected trigger product or variant not found in store catalog." } }, { status: 400 });
+    errors.triggerProductId = "Selected trigger product or variant not found in store catalog.";
+    return json({ errors }, { status: 400 });
   }
 
   if (!offeredProduct || !offeredVariant) {
-    return json({ errors: { offeredProductId: "Selected offered product or variant not found in store catalog." } }, { status: 400 });
+    errors.offeredProductId = "Selected offered product or variant not found in store catalog.";
+    return json({ errors }, { status: 400 });
   }
 
   const selectedLocation = locations.find((l) => l.id === locationId);
@@ -192,11 +205,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function NewOfferCheckScreen() {
-  const { products, locations, settings, duplicateCheck } = useLoaderData<typeof loader>();
+  const { products, locations, settings, duplicateCheck, billingStatus } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const navigate = useNavigate();
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
+  const isLimitReached = !billingStatus.hasActivePro && billingStatus.freeChecksUsed >= billingStatus.freeCheckLimit;
+
 
   // Filter / Search state for products
   const [productSearch, setProductSearch] = useState<string>("");
@@ -392,6 +407,32 @@ export default function NewOfferCheckScreen() {
                 . Adjust the proposed discount, quantity, or scenario parameters below. Running the check will save a separate, independent audit record.
               </p>
             </Banner>
+          )}
+
+          {!billingStatus.hasActivePro && (
+            isLimitReached ? (
+              <Banner
+                title={`Free audit limit reached (${billingStatus.freeChecksUsed}/${billingStatus.freeCheckLimit} used)`}
+                tone="critical"
+                action={{ content: "Upgrade to Pro ($19.99/mo, 3-day trial)", url: "/app/billing" }}
+              >
+                <p>
+                  Your store has completed {billingStatus.freeChecksUsed} of {billingStatus.freeCheckLimit} complimentary pre-flight offer audits.
+                  Upgrade to <strong>PromoLint Pro</strong> for unlimited audits, automated discount stacking audits, and full CSV exports.
+                </p>
+              </Banner>
+            ) : (
+              <Banner
+                title={`Free Tier: ${billingStatus.freeChecksUsed} of ${billingStatus.freeCheckLimit} free audits used`}
+                tone="info"
+                action={{ content: "View Pro Plan ($19.99/mo)", url: "/app/billing" }}
+              >
+                <p>
+                  You have {billingStatus.freeCheckLimit - billingStatus.freeChecksUsed} free pre-flight audits remaining.
+                  PromoLint Pro includes unlimited audits with a 3-day free trial.
+                </p>
+              </Banner>
+            )
           )}
 
           {actionData?.errors && (
@@ -743,9 +784,15 @@ export default function NewOfferCheckScreen() {
 
                   <InlineStack align="end" gap="300">
                     <Button onClick={() => navigate("/app")}>Cancel</Button>
-                    <Button variant="primary" submit loading={isSubmitting}>
-                      Run pre-launch check
-                    </Button>
+                    {isLimitReached ? (
+                      <Button variant="primary" url="/app/billing">
+                        Upgrade to Pro for unlimited audits
+                      </Button>
+                    ) : (
+                      <Button variant="primary" submit loading={isSubmitting}>
+                        Run pre-launch check
+                      </Button>
+                    )}
                   </InlineStack>
                 </BlockStack>
               </Card>

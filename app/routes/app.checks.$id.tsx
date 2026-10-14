@@ -19,6 +19,7 @@ import {
 import { authenticate } from "../shopify.server";
 import { getOfferCheckById, deleteOfferCheck, recheckExistingOfferCheck } from "../services/checks.server";
 import { type OfferWarning, getStructuredFindingDetails } from "../services/offer-analyzer";
+import { checkSubscriptionStatus } from "../services/billing.server";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -48,7 +49,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session, billing } = await authenticate.admin(request);
   const checkId = params.id;
 
   if (!checkId) {
@@ -64,6 +65,12 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   if (intent === "recheck") {
+    const billingStatus = await checkSubscriptionStatus(billing, session.shop);
+    if (!billingStatus.hasActivePro && billingStatus.freeChecksUsed >= billingStatus.freeCheckLimit) {
+      return json({
+        error: `You have reached the Free Tier limit of ${billingStatus.freeCheckLimit} audits. Upgrade to PromoLint Pro ($19.99/mo) for unlimited audits.`
+      }, { status: 403 });
+    }
     const newCheck = await recheckExistingOfferCheck(admin, session.shop, checkId);
     return redirect(`/app/checks/${newCheck.id}`);
   }
@@ -846,14 +853,18 @@ export default function CheckResultDetailScreen() {
                 {/* Recheck current data (Requirement 18) */}
                 <Form method="post">
                   <input type="hidden" name="intent" value="recheck" />
-                  <Button
-                    variant="primary"
-                    submit
-                    loading={isRechecking}
-                    helpText="Queries current catalog prices, unit costs, stock, and discounts to create a new time-stamped result snapshot without altering this historical record."
-                  >
-                    Recheck current data
-                  </Button>
+                  <BlockStack gap="100">
+                    <Button
+                      variant="primary"
+                      submit
+                      loading={isRechecking}
+                    >
+                      Recheck current data
+                    </Button>
+                    <Text as="p" variant="bodyXs" tone="subdued">
+                      Queries current catalog prices, unit costs, stock, and discounts to create a new time-stamped result snapshot without altering this historical record.
+                    </Text>
+                  </BlockStack>
                 </Form>
 
                 {/* Duplicate check as starting point (Requirement 19) */}
@@ -865,17 +876,19 @@ export default function CheckResultDetailScreen() {
                   Run another check
                 </Button>
 
-                <Form method="post">
+                <Form
+                  method="post"
+                  onSubmit={(e) => {
+                    if (!confirm("Are you sure you want to delete this saved check?")) {
+                      e.preventDefault();
+                    }
+                  }}
+                >
                   <input type="hidden" name="intent" value="delete" />
                   <Button
                     tone="critical"
                     submit
                     loading={isDeleting}
-                    onClick={(e) => {
-                      if (!confirm("Are you sure you want to delete this saved check?")) {
-                        e.preventDefault();
-                      }
-                    }}
                   >
                     Delete check
                   </Button>

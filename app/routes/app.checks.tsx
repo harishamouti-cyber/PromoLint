@@ -9,6 +9,7 @@ import {
   Text,
   Badge,
   Button,
+  Banner,
   EmptyState,
   Box,
   InlineStack,
@@ -19,10 +20,11 @@ import {
 } from "@shopify/polaris";
 import { authenticate } from "../shopify.server";
 import { getRecentOfferChecks, deleteOfferCheck } from "../services/checks.server";
+import { checkSubscriptionStatus } from "../services/billing.server";
 import { PROMO_LINT_EMPTY_STATE_IMAGE } from "../components/empty-state-illustration";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
   const url = new URL(request.url);
 
   const searchQuery = url.searchParams.get("q") || "";
@@ -30,13 +32,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const discountType = url.searchParams.get("discountType") || "ALL";
   const dateRange = url.searchParams.get("dateRange") || "ALL";
 
-  const checks = await getRecentOfferChecks(session.shop, {
-    searchQuery,
-    status,
-    discountType,
-    dateRange,
-    limit: 100,
-  });
+  const [checks, billingStatus] = await Promise.all([
+    getRecentOfferChecks(session.shop, {
+      searchQuery,
+      status,
+      discountType,
+      dateRange,
+      limit: 100,
+    }),
+    checkSubscriptionStatus(billing, session.shop),
+  ]);
 
   return json({
     checks,
@@ -44,6 +49,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     status,
     discountType,
     dateRange,
+    billingStatus,
   });
 };
 
@@ -60,7 +66,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function OfferChecksListScreen() {
-  const { checks, searchQuery, status, discountType, dateRange } = useLoaderData<typeof loader>();
+  const { checks, searchQuery, status, discountType, dateRange, billingStatus } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const submit = useSubmit();
 
@@ -120,9 +126,13 @@ export default function OfferChecksListScreen() {
       }}
       secondaryActions={[
         {
-          content: "Export CSV",
+          content: billingStatus.hasActivePro ? "Export CSV" : "Export CSV (Pro)",
           accessibilityLabel: "Export filtered audit checks as CSV spreadsheet",
           onAction: () => {
+            if (!billingStatus.hasActivePro) {
+              navigate("/app/billing");
+              return;
+            }
             const params = new URLSearchParams(window.location.search);
             window.open(`/app/checks/export?${params.toString()}`, "_blank");
           },
@@ -132,6 +142,18 @@ export default function OfferChecksListScreen() {
       backAction={{ content: "Home", onAction: () => navigate("/app") }}
     >
       <BlockStack gap="400">
+        {!billingStatus.hasActivePro && (
+          <Banner
+            title={`Free Tier: ${billingStatus.freeChecksUsed} of ${billingStatus.freeCheckLimit} free audits used`}
+            tone="info"
+            action={{ content: "Upgrade to Pro ($19.99/mo, 3-day trial)", url: "/app/billing" }}
+          >
+            <p>
+              Your store is currently using the Free Tier. Upgrade to <strong>PromoLint Pro</strong> for unlimited audits,
+              automated discount stacking checks, and full CSV exports.
+            </p>
+          </Banner>
+        )}
         {/* Search & Filter Toolbar (Requirement 20) */}
         <Card>
           <form onSubmit={handleSearchSubmit}>
@@ -340,17 +362,19 @@ export default function OfferChecksListScreen() {
                       >
                         Duplicate
                       </Button>
-                      <Form method="post">
+                      <Form
+                        method="post"
+                        onSubmit={(e) => {
+                          if (!confirm("Delete this saved check?")) {
+                            e.preventDefault();
+                          }
+                        }}
+                      >
                         <input type="hidden" name="checkId" value={check.id} />
                         <Button
                           size="slim"
                           tone="critical"
                           submit
-                          onClick={(e) => {
-                            if (!confirm("Delete this saved check?")) {
-                              e.preventDefault();
-                            }
-                          }}
                         >
                           Delete
                         </Button>

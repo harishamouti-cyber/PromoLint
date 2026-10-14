@@ -11,6 +11,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   // If this webhook already ran, the session may have been deleted previously.
   if (shop) {
     await db.session.deleteMany({ where: { shop } });
+    await db.promoLintBilling.updateMany({
+      where: { shop },
+      data: { status: "CANCELLED", plan: "FREE" },
+    });
   }
 
   return new Response();

@@ -20,14 +20,16 @@ import {
 import { authenticate } from "../shopify.server";
 import { getRecentOfferChecks, getOfferCheckMetrics } from "../services/checks.server";
 import { checkStoreReadiness } from "../services/shopify-catalog.server";
+import { checkSubscriptionStatus } from "../services/billing.server";
 import { PROMO_LINT_EMPTY_STATE_IMAGE } from "../components/empty-state-illustration";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
-  const [checks, readiness, metrics] = await Promise.all([
+  const { admin, session, billing } = await authenticate.admin(request);
+  const [checks, readiness, metrics, billingStatus] = await Promise.all([
     getRecentOfferChecks(session.shop, 5),
     checkStoreReadiness(admin),
     getOfferCheckMetrics(session.shop),
+    checkSubscriptionStatus(billing, session.shop),
   ]);
 
   return json({
@@ -35,11 +37,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     shop: session.shop,
     readiness,
     metrics,
+    billingStatus,
   });
 };
 
 export default function HomeScreen() {
-  const { checks, readiness, metrics } = useLoaderData<typeof loader>();
+  const { checks, readiness, metrics, billingStatus } = useLoaderData<typeof loader>();
   const navigate = useNavigate();
 
   const renderStatusBadge = (status: string) => {
@@ -77,6 +80,10 @@ export default function HomeScreen() {
         {
           content: "Settings",
           onAction: () => navigate("/app/settings"),
+        },
+        {
+          content: billingStatus.hasActivePro ? "Plan & Billing" : "Plan & Billing ($19.99/mo)",
+          onAction: () => navigate("/app/billing"),
         },
       ]}
     >

@@ -37,6 +37,12 @@ api_version = "2025-01"
   topics = [ "app/scopes_update" ]
   uri = "/webhooks/app/scopes_update"
 
+  # Handled by: /app/routes/webhooks.app_subscriptions.update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app_subscriptions/update" ]
+  uri = "/webhooks/app_subscriptions/update"
+
+
   # Mandatory GDPR compliance webhooks
   [[webhooks.subscriptions]]
   uri = "/webhooks/compliance/customers_data_request"

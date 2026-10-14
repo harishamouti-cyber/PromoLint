@@ -1,10 +1,26 @@
 import type { LoaderFunctionArgs } from "@remix-run/node";
 import { authenticate } from "../shopify.server";
 import { getRecentOfferChecks, formatOfferChecksToCsv } from "../services/checks.server";
+import { checkSubscriptionStatus } from "../services/billing.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, billing } = await authenticate.admin(request);
+  const billingStatus = await checkSubscriptionStatus(billing, session.shop);
+
+  if (!billingStatus.hasActivePro) {
+    return new Response(
+      "CSV Export is a PromoLint Pro feature. Please upgrade your plan at /app/billing to export audit records.",
+      {
+        status: 403,
+        headers: {
+          "Content-Type": "text/plain; charset=utf-8",
+        },
+      }
+    );
+  }
+
   const url = new URL(request.url);
+
 
   const searchQuery = url.searchParams.get("q") || "";
   const status = url.searchParams.get("status") || "ALL";

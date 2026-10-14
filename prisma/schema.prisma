@@ -90,3 +90,20 @@ model PromoLintSettings {
   updatedAt           DateTime @updatedAt
 }
 
+model PromoLintBilling {
+  id               String    @id @default(uuid())
+  shop             String    @unique
+  plan             String    @default("FREE") // "FREE" | "PRO_MONTHLY"
+  status           String    @default("ACTIVE") // "ACTIVE" | "PENDING" | "CANCELLED" | "DECLINED" | "EXPIRED"
+  subscriptionId   String?
+  trialEndsAt      DateTime?
+  currentPeriodEnd DateTime?
+  isTest           Boolean   @default(false)
+  lastConfirmedAt  DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([shop, status])
+}
+
+

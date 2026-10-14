@@ -68,7 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     minMarginThreshold: minMargin,
   });
 
-  return json({ success: true, errors: {} });
+  return json({ success: true, errors: {} as Record<string, string> });
 };
 
 export default function SettingsScreen() {
@@ -114,7 +114,7 @@ export default function SettingsScreen() {
           <Banner tone="critical" title="Please correct the form errors">
             <ul style={{ margin: 0, paddingLeft: "16px" }}>
               {Object.values(actionData.errors).map((err, i) => (
-                <li key={i}>{err}</li>
+                <li key={i}>{String(err)}</li>
               ))}
             </ul>
           </Banner>
