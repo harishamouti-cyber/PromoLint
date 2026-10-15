@@ -1,16 +1,16 @@
 name = "PromoLint"
 client_id = "651686b64c50cd458dfa630df85781d5"
-application_url = "https://example.com"
+application_url = "https://promo-lint.vercel.app"
 embedded = true
 
 [build]
-automatically_update_urls_on_dev = true
+automatically_update_urls_on_dev = false
 
 [auth]
 redirect_urls = [
-  "https://example.com/auth/callback",
-  "https://example.com/auth/shopify/callback",
-  "https://example.com/api/auth/callback"
+  "https://promo-lint.vercel.app/auth/callback",
+  "https://promo-lint.vercel.app/auth/shopify/callback",
+  "https://promo-lint.vercel.app/api/auth/callback"
 ]
 
 [access_scopes]
